@@ -48,10 +48,11 @@ public final class StackNestProgressReporter {
     public private(set) var isStopped = false
 
     /// セッションへ書き戻す役を作り、`StackNestProgressRegistry.shared` に弱い参照で載せる（終了時の送り切りのため）。
-    /// 役は送り切るまでセッションを強く持つ。
+    /// 役は（閉じた後も）手放されるまでセッションを強く持つ。
     ///
     /// Creates a reporter that posts to `session` and registers it (weakly) with
-    /// `StackNestProgressRegistry.shared` for the quit-time flush. It keeps the session alive until sends finish.
+    /// `StackNestProgressRegistry.shared` for the quit-time flush. It keeps the session alive for as long as the reporter itself
+    /// is alive, even after `close()`; release the reporter when the book closes.
     public convenience init(session: StackNestBookSession, startPage: Int?, timing: Timing = .init(),
                             onFailure: @escaping @MainActor (StackNestViewerError) -> Void)
     {

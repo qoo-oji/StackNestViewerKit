@@ -67,7 +67,7 @@ Swift のビューアは、ここに書いたことをすべて実装した Stac
 | `expiresAt` | 文字列（ISO 8601） | トークンの有効期限（発行から 30 日）。StackNest は UTC の `Z`・小数秒なしで書く。読み手は小数秒と `+09:00` のような時差付きも読むが、時差の無い時刻は読まない |
 | `pageCount` | 整数 | 開いた時点のページ数（正は `manifest`） |
 | `direction` | `"rtl"` / `"ltr"` | 開いた時点の読む方向（正は `manifest`） |
-| `startPage` | 整数（0 始まり） | 開いた時点の読書位置。ここから開く |
+| `startPage` | 整数（0 始まり） | 開いた時点の読書位置。ここから開く。`manifest` を読んだら、その `pageCount` に合わせて `0`…`pageCount - 1` に収めてから開く（本のページが減っていることがある。Swift のビューアは `clampedStartPage`） |
 
 - 知らない項目は読み飛ばしてください（後の版で項目が増えても開けるように）。
 - `title` と `direction` は無くても開きます。`title` が無い、または文字列でないときは空の題名として扱い、`direction` が無い、または `"rtl"`・`"ltr"` 以外の値なら参照ファイルの向きは使いません（開いた後の読む方向は `manifest` の `direction` に従います）。それ以外の項目（`format`・`version`・`book`・`token`・`expiresAt`・`pageCount`・`startPage`）が無い、または型が違うファイルは開きません。
@@ -81,9 +81,9 @@ Swift のビューアは、ここに書いたことをすべて実装した Stac
   - `expiresAt` が読めない形（時差の無い時刻など）
   - `pageCount` が整数でない、負、または 100,000 を超える（0 は許す）
   - `startPage` が整数でない、負、または 10^15 以上。10^15 未満で `pageCount` を超える値は断らず、`0` から `pageCount - 1` に収めて開く
-- 期限（`expiresAt`）を過ぎたファイルは、読み込み自体は通り、期限切れとして報告されます。StackNestViewerKit は、期限切れの参照ファイルでセッションを開こうとすると期限切れ（`expired`）で失敗します。読み手は期限を確かめて、利用者に「StackNest から開き直してください」と案内してください。
+- 期限（`expiresAt`）を過ぎたファイルは、読み込み自体は通り、期限切れとして報告されます。StackNestViewerKit は、期限切れの参照ファイルでもセッションを作れます（`init(contentsOf:)` は成功します）が、最初の要求（`manifest()` など）が通信せずに期限切れ（`expired`）で失敗します。読み手は期限を確かめて、利用者に「StackNest から開き直してください」と案内してください。
 - 形式の検査は、`book` のホストを絞りません（LAN や IPv6 のアドレスも形式としては正しい）。接続先を絞るかどうかは読み手の判断です（StackNestViewerKit は既定で 127.0.0.1 と `::1` にだけつなぎます。下の「ビューアへのお願い」）。
-- [Samples](Samples) で、`reference-v1`・`reference-v1-unknown-keys`・`reference-expired`・`reference-lan-host`・`reference-ipv6-zone` は形式としては読めます（`reference-expired` は期限切れでセッションが失敗するため、`reference-lan-host` と `reference-ipv6-zone` は既定の宛先の制限で、StackNestViewerKit は開きません）。`reference-credentials`（資格情報つき）・`reference-malformed`（壊れた JSON）・`reference-v2`（読めない版）は断ります。
+- [Samples](Samples) で、`reference-v1`・`reference-v1-unknown-keys`・`reference-expired`・`reference-lan-host`・`reference-ipv6-zone` は形式としては読めます（`reference-expired` は期限切れで最初の要求が失敗するため、`reference-lan-host` と `reference-ipv6-zone` は既定の宛先の制限で、StackNestViewerKit は開きません）。`reference-credentials`（資格情報つき）・`reference-malformed`（壊れた JSON）・`reference-v2`（読めない版）は断ります。
 - ローカルの書庫の本では `book` が `http://127.0.0.1:<port>/api/v1/libraries/<lib>/books/<id>` になります（その Mac の中だけで待ち受ける口）。
 - **リモートの書庫の本も、`book` は `http://127.0.0.1:<port>/api/v1/relay/<relayID>` になります**（試用）。StackNest がこの口で受けた要求を、リモートのサーバへ中継します。実測では、サンドボックスのビューアが `NSAllowsLocalNetworking` の下で届くのは 127.0.0.1 とプライベートのアドレスまでで、Tailscale のアドレス（100.64.0.0/10）や公開のアドレスへの平文の HTTP は App Transport Security に止められます。そのため StackNest がリモートの本を中継し、ビューアはいつも手元の 127.0.0.1 につなげば済むようにしています。下の 4 つの API はローカルの本と同じで、ビューアは `book` の形を見分ける必要はありません。リモートのサーバの鍵はビューアには渡りません（参照ファイルの `token` は中継用の鍵で、`expiresAt` は発行から 30 日とリモートの鍵の期限の早い方です）。
 - この口は StackNest が起動していて設定が ON のあいだだけ動き、ポートも変わることがあります。接続を拒まれたら、「StackNest から開き直してください」と表示してください。StackNest を終了すると中継は消えるので、その後の要求は **401** になります（中継の期限が切れたときも同じです。「StackNest から開き直してください」と表示してください）。中継の取り次ぎでリモートのサーバに届かない・応答が大きすぎる・リダイレクトされたときは **502** です。中継の `progress` に 64 KiB を超える本文を送ると **413** で、リモートには取り次ぎません。リモートの応答（403・404 や `X-Library-Locked` を含む）はそのまま返します。リモートが中継を **401・403** で断ったら（パスワードの変更・接続の取り消しなど）、StackNest はその応答を返したうえで中継を閉じるので、以後の要求はキャッシュにあるページも含めて **401** になります（「StackNest から開き直してください」と表示してください）。
@@ -102,7 +102,7 @@ Swift のビューアは、ここに書いたことをすべて実装した Stac
 - このトークンで使えるのは上の 4 つだけです。ほかの URL・ほかの本は **403** です。
 - 自分の本への **403** でも、ヘッダ `X-Library-Locked: 1` が付いているときは、参照ファイルを作った後に書庫のロックが変わった（パスワードを変えた、または施錠した）ことを表します。「StackNest でライブラリを解錠し、StackNest から開き直してください」と表示してください（ビューアの中では「書庫」がアーカイブの意味になるため、表示には「ライブラリ」を使います）。
 - **401** はトークンの期限切れ（または取り消し）です。トークンを出した後に、その本の番号に別の本が入った（本を消してから別の本を取り込んだ）ときも 401 になります。「StackNest から開き直してください」と表示してください。
-- **404** は本が見つからない（書庫から消えた、サーバが書庫を閉じた）ことを表します。`pages/{n}` では範囲外のページ番号も **404** です。
+- **404** は本が見つからない（書庫から消えた、サーバが書庫を閉じた）ことを表します。`pages/{n}` では範囲外のページ番号も **404** です。`cover` の **404** は、本に表紙の画像が無いことも表します。
 - `pages/{n}` でページを描画できないときは **500**、`progress` に負のページを送ると **400** です。
 
 ### 中継のページ

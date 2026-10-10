@@ -39,9 +39,9 @@ func lanConfiguration() -> StackNestBookSession.Configuration {
 - `waitLimit`（既定 25 秒）は要求ごとに数え、少しずつ流れ続ける応答でも超えれば `cannotConnect` で戻る。1 回の呼び出し
   （async も同期も）は要求を最大 3 件（範囲の確かめ・ページ・404 の後の読み直し）出しうるので、最悪で `waitLimit` の
   3 倍まで待ってから戻る。
-- `URLSession` はキャッシュ・クッキー・資格情報の保管を持たない。
+- `URLSession` はキャッシュ・クッキー・資格情報の保管を持たない。プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵がプロキシへ渡ることはない。
 
-- Redirects are refused (3xx fails with `httpStatus`); the token goes only to the `book` origin.
+- Redirects are refused (3xx fails with `httpStatus`); the token goes only to the `book` origin. The kit never uses a proxy (system and PAC proxies are disabled), so the token can't reach one.
 - Bodies are capped at 64 MiB by default (`responseTooLarge`); expiry is checked before every request (`expired`).
 - `waitLimit` (25 seconds by default) is counted per request, and a request that exceeds it fails with
   `cannotConnect`, even if the response is trickling in. A single call (async or blocking) can make up to three

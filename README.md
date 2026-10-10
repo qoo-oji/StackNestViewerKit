@@ -90,7 +90,9 @@ minor release can break the API, so stay within one minor version.
    （と、終了時の `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` が報告者を閉じた後）の
    `note(page:)` は無視される。`applicationShouldTerminate` の例は DocC の「Writing Progress」。
    Pass `note(page:)` to a `StackNestProgressReporter` and call `close()` when done; `note(page:)` after `close()` (or
-   after the quit-time flush has closed the reporter) is ignored. At quit, call
+   after the quit-time flush has closed the reporter) is ignored. If another quit handler vetoes the quit after the
+   flush, create new reporters for the books that are still open.
+   終了を別の処理が取り消したら、まだ開いている本の報告者を作り直す。 At quit, call
    `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` (from `applicationShouldTerminate`; see "Writing
    Progress" in the DocC) so the last position is not lost.
 8. **同期の読み手 / Blocking readers**: 同期の API を持つビューアは、ブロックしてよいスレッドから
@@ -175,6 +177,8 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
   [English](Documentation/BookReferenceFormat.en.md)）。
 
 - Connects only to `127.0.0.1` and `::1` by default; refuses redirects; sends the token only to the `book` origin.
+- Never uses a proxy (system and PAC proxies are disabled), so the token can't reach one.
+  プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵は `book` の宛先にだけ送られる。
 - Keeps the token in memory only; `StackNestBookReference` isn't `Codable` and redacts the token.
 - Caps bodies at 64 MiB, checks expiry before every request, and uses no cache, cookie or credential storage.
 - `waitLimit` (25 seconds by default) is counted per request. A single async or blocking call can make up to three
@@ -200,6 +204,13 @@ semver。0.x の間は壊す変更で minor を上げる。読める参照ファ
 
 Semantic versioning; while 0.x, breaking changes bump the minor version. Adding a readable reference version is a
 minor change and dropping one is major. See [CHANGELOG.md](CHANGELOG.md).
+
+公開の enum（`StackNestReadingDirection`・`StackNestLanguage`・`StackNestRequestPriority`・`StackNestViewerSupport.Issue`、
+Testing の `Route`・`Response`）は、0.x の minor でケースが増えることがある。`switch` には `default` を書く。
+
+Public enums (`StackNestReadingDirection`, `StackNestLanguage`, `StackNestRequestPriority`,
+`StackNestViewerSupport.Issue`, and the Testing target's `Route` and `Response`) may gain cases in a 0.x minor
+version, so always switch with a `default` case.
 
 ## 開発 / Development
 
