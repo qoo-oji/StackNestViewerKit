@@ -1,0 +1,13 @@
+# 公開の場（コード・コメント・文書・コミットのメッセージ・ファイル名・Release の本文）に出さない内部の印。
+# 1 行 1 つの拡張正規表現（大文字小文字を区別する）。# で始まる行と空行は読まない。
+# 読むのは Scripts/check-internal-markers.sh（pre-push・手作業の点検）と Scripts/release_support.py（Release の本文）。
+# このファイル自身が検査に掛からないよう、語は書き方を変えて持つ（[x] は x の 1 文字）。
+G[0-9]{2}
+裁[定]
+[/]Users[/]
+stackroom[-]successor
+super[p]owers
+decisions[.]md
+qooviewer[-]fork
+phase[-]g[0-9]
+claude[.]ai/code/session[_]

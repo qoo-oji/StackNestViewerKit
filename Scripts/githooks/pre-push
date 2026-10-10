@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# HTTPS の remote への push は gh の active アカウントの認証で通るため、期待のアカウント以外のときは止める。
+# 有効化: git config core.hooksPath Scripts/githooks（クローンごとに 1 回）
+EXPECTED="${STACKNEST_GH_LOGIN:-shelfsmith}"
+unset GITHUB_TOKEN GH_TOKEN
+ACTUAL="$(gh api user --jq .login 2>/dev/null || true)"
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  echo "pre-push: active gh account is '${ACTUAL:-none}', expected '$EXPECTED'. Push refused." >&2
+  exit 1
+fi
+ROOT="$(git rev-parse --show-toplevel)"
+# 標準入力（ref の組）は 1 度しか読めないので、受けてから 3 つの検査に渡す。
+REFS="$(cat)"
+[ -n "$REFS" ] || exit 0
+# 公開のコミットに Claude-Session: の行を残さない（このリポジトリの決まり。CONTRIBUTING.md）。
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-commit-trailers.sh" pre-push || exit 1
+# 内部の印（内部の作業の番号・計画の文書の名前など。語彙は Scripts/internal-markers.txt）を push しない。
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-internal-markers.sh" pre-push || exit 1
+# 個人識別子（実名など）を push しない。push する各コミットのファイル全体と、新しいコミットのメッセージ・作成者を検査する。
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-private-identifiers.sh" pre-push

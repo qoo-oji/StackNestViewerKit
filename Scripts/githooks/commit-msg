@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# コミットのメッセージに Claude-Session: の行（会話の URL）を入れさせない（このリポジトリの決まり。CONTRIBUTING.md）。
+# 会話の側の既定は全コミットに付けるよう求めるが、このリポジトリでは付けない。pre-push でも止めるが、コミットの時点で
+# 止めれば履歴を書き換えずに済む。有効化: git config core.hooksPath Scripts/githooks（クローンごとに 1 回）
+exec "$(git rev-parse --show-toplevel)/Scripts/check-commit-trailers.sh" message "$1"
