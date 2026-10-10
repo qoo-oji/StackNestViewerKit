@@ -49,6 +49,10 @@ public final class FakeStackNestServer: @unchecked Sendable {
         self.options = options
     }
 
+    deinit {
+        listener?.cancel()
+    }
+
     /// 127.0.0.1 の空いているポート（`port` が 0 のとき）で待ち受けを始め、ポートを返す。
     ///
     /// Starts listening on 127.0.0.1 (any free port when `port` is 0) and returns the port.
@@ -132,9 +136,18 @@ public final class FakeStackNestServer: @unchecked Sendable {
             guard let self else { return connection.cancel() }
             var buffer = buffer
             if let data { buffer.append(data) }
-            if let request = HTTPRequest(buffer) {
+            switch HTTPRequest.parse(buffer) {
+            case .request(let request):
                 self.respond(to: request, on: connection)
-            } else if isComplete || error != nil || buffer.count > 1 << 20 {
+                return
+            case .malformed:
+                // 解釈できない Content-Length は 400 で閉じる（落ちない）。
+                connection.send(content: Self.response(400), completion: .contentProcessed { _ in connection.cancel() })
+                return
+            case .incomplete:
+                break
+            }
+            if isComplete || error != nil || buffer.count > 1 << 20 {
                 connection.cancel()
             } else {
                 self.receive(on: connection, buffer: buffer)
@@ -190,7 +203,7 @@ public final class FakeStackNestServer: @unchecked Sendable {
     }
 
     private static func response(_ status: Int, headers: [String: String] = [:], body: Data = Data()) -> Data {
-        let reason = [200: "OK", 302: "Found", 401: "Unauthorized", 404: "Not Found"][status] ?? "Status"
+        let reason = [200: "OK", 302: "Found", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         for (name, value) in headers.sorted(by: { $0.key < $1.key }) { head += "\(name): \(value)\r\n" }
         head += "\r\n"
@@ -205,6 +218,26 @@ struct HTTPRequest {
     let headers: [String: String]
     let body: Data
 
+    enum Parsed {
+        case request(HTTPRequest)
+        case incomplete
+        case malformed
+    }
+
+    /// 見出しが揃っていて `Content-Length` が負・数でないなら `.malformed`、本文が足りなければ `.incomplete`。
+    static func parse(_ buffer: Data) -> Parsed {
+        guard let end = buffer.range(of: Data("\r\n\r\n".utf8)),
+              let head = String(data: buffer[..<end.lowerBound], encoding: .utf8)
+        else { return .incomplete }
+        for line in head.components(separatedBy: "\r\n").dropFirst() {
+            guard let colon = line.firstIndex(of: ":"),
+                  line[..<colon].lowercased() == "content-length" else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            guard let length = Int(value), length >= 0 else { return .malformed }
+        }
+        return HTTPRequest(buffer).map(Parsed.request) ?? .incomplete
+    }
+
     init?(_ buffer: Data) {
         guard let end = buffer.range(of: Data("\r\n\r\n".utf8)),
               let head = String(data: buffer[..<end.lowerBound], encoding: .utf8)
@@ -217,7 +250,7 @@ struct HTTPRequest {
             guard let colon = line.firstIndex(of: ":") else { continue }
             headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
-        let length = Int(headers["content-length"] ?? "0") ?? 0
+        guard let length = Int(headers["content-length"] ?? "0"), length >= 0 else { return nil }
         let bodyStart = end.upperBound
         guard buffer.count - bodyStart >= length else { return nil }
         method = String(requestLine[0])

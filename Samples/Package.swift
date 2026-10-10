@@ -1,7 +1,7 @@
 // swift-tools-version: 6.2
 // 部品を手元で試すための道具（部品のパッケージとは別。部品は `..` から取り込む）:
 //   - stacknest-fake-server: 127.0.0.1 の本物のソケットで、フォルダの画像を本として配る偽の StackNest
-//   - stacknest-kit-probe: 参照ファイルを 1 つ受け取り、manifest → page 0 → progress を試す
+//   - stacknest-kit-probe: 参照ファイルを 1 つ受け取り、manifest → 開くページ → progress を試す
 //   - HostMode*: ホストの言語設定の組み合わせで、README の統合例を警告をエラーにしてコンパイルする
 // 部品のパッケージの名前を明示する（パスで取り込むと、識別子が置き場のディレクトリの名前になり、手元と CI で違うため）。
 import PackageDescription

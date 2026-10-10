@@ -93,6 +93,8 @@ struct EndToEndTests {
         #expect(result.pageContentType == "image/png")
         #expect(result.progressPosted)
         #expect(server.receivedRequests.map(\.path) == ["manifest", "pages/2", "progress"])
+        // 書き戻すのは開いたページ（3 ページで startPage 2 なので 2）。0 でも他でもない。
+        #expect(server.receivedRequests.last?.progressPage == 2)
         #expect(!String(decoding: try KitProbe.json(result), as: UTF8.self).contains("fake-server-token"))
     }
 
@@ -116,5 +118,55 @@ struct EndToEndTests {
         let result = await KitProbe.run(referenceFile: try writeReference(reference))
         #expect(result.failure == "hostNotAllowed")
         #expect(result.manifestPageCount == nil)
+    }
+
+    @Test("probe の引数: --no-progress で書き戻さない。置き場違いと綴り違いは拒む")
+    func probeArgumentParsing() {
+        #expect(ProbeOptions.parse(["book"])?.postsProgress == true)
+        #expect(ProbeOptions.parse(["book", "--no-progress"])?.postsProgress == false)
+        #expect(ProbeOptions.parse(["book", "--allow-host", "h"])?.extraHosts == ["h"])
+        #expect(ProbeOptions.parse(["--no-progress", "book"]) == nil)
+        #expect(ProbeOptions.parse(["book", "--no-progres"]) == nil)
+        #expect(ProbeOptions.parse(["book", "--allow-host"]) == nil)
+        #expect(ProbeOptions.parse([]) == nil)
+    }
+
+    @Test("負の Content-Length は 400 で、落ちずに次の要求へ答える")
+    func negativeContentLengthIsRefusedWithoutCrashing() async throws {
+        let server = try startServer()
+        defer { server.stop() }
+        let port = try #require(server.bookURL.port)
+        let bad = try rawExchange(port: port, request: "GET /x HTTP/1.1\r\nContent-Length: -1\r\n\r\n")
+        #expect(bad.hasPrefix("HTTP/1.1 400"))
+        let session = try StackNestBookSession(contentsOf: try writeReference(try server.reference()))
+        #expect(try await session.manifest().pageCount == 3)
+    }
+
+    /// 127.0.0.1 の本物のソケットへ生の要求を送り、閉じられるまでの応答を文字列で返す。
+    private func rawExchange(port: Int, request: String) throws -> String {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        try #require(fd >= 0)
+        defer { close(fd) }
+        var timeout = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        try #require(connected == 0)
+        _ = request.withCString { send(fd, $0, strlen($0), 0) }
+        var received = Data()
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(fd, &chunk, chunk.count, 0)
+            if count <= 0 { break }
+            received.append(contentsOf: chunk[..<count])
+        }
+        return String(decoding: received, as: UTF8.self)
     }
 }

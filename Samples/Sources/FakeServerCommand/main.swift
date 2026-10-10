@@ -70,7 +70,7 @@ options.redirects = redirects
 options.delays = delays
 let server = FakeStackNestServer(options: options)
 if let recordOut {
-    server.onEveryRecord { _ in try? server.recordsJSON().write(to: recordOut) }
+    server.onEveryRecord { _ in try? server.recordsJSON().write(to: recordOut, options: .atomic) }
 }
 do {
     let bound = try server.start(port: port)
@@ -78,7 +78,10 @@ do {
     say("stacknest-fake-server: listening on http://127.0.0.1:\(bound) with \(options.pages.count) pages")
     say("stacknest-fake-server: wrote \(referenceOut.path)")
     // 参照ファイルは最後に書く（ファイルができたら、上の 2 行は出ている＝待つ側が読める）。
-    try reference.write(to: referenceOut)
+    // 鍵を含むので 0600 で作る（StackNest と同じ）。
+    guard FileManager.default.createFile(atPath: referenceOut.path, contents: reference,
+                                         attributes: [.posixPermissions: 0o600])
+    else { fail("could not write \(referenceOut.path)") }
 } catch {
     fail("could not start: \(error)")
 }
@@ -89,7 +92,7 @@ let stopSources = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
     let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
     source.setEventHandler {
         server.stop()
-        if let recordOut { try? server.recordsJSON().write(to: recordOut) }
+        if let recordOut { try? server.recordsJSON().write(to: recordOut, options: .atomic) }
         exit(0)
     }
     source.resume()

@@ -18,6 +18,37 @@ public struct ProbeResult: Codable, Sendable, Equatable {
     public var seconds: Double = 0
 }
 
+/// probe の引数（`<参照ファイル> [--no-progress] [--allow-host <ホスト>]...`）を解いた結果。
+///
+/// The probe's parsed command line.
+public struct ProbeOptions: Equatable, Sendable {
+    public var referencePath: String
+    /// false なら書き戻さない。 / false means no write-back.
+    public var postsProgress = true
+    public var extraHosts: Set<String> = []
+
+    /// 引数（プログラム名を除く）を解く。参照ファイルが先頭にない・知らない旗・値の欠けた旗は nil（呼び側が使い方を出して 2 で終わる）。
+    ///
+    /// Parses the arguments (without the program name); nil for a misplaced path, an unknown flag or a missing value.
+    public static func parse(_ arguments: [String]) -> ProbeOptions? {
+        var rest = arguments[...]
+        guard let path = rest.popFirst(), !path.hasPrefix("-") else { return nil }
+        var options = ProbeOptions(referencePath: path)
+        while let flag = rest.popFirst() {
+            switch flag {
+            case "--no-progress":
+                options.postsProgress = false
+            case "--allow-host":
+                guard let host = rest.popFirst() else { return nil }
+                options.extraHosts.insert(host)
+            default:
+                return nil
+            }
+        }
+        return options
+    }
+}
+
 public enum KitProbe {
     /// 試す。失敗しても投げず、`failure` に入れて返す。`postsProgress` が false なら書き戻さない（実物の StackNest に
     /// 向けるとき、読書位置の記録を動かさないため）。
