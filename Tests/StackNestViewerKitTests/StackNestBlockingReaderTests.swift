@@ -109,7 +109,7 @@ struct StackNestBlockingReaderTests {
         let page = await onThread { Result { try reader.page(0) } }
         #expect(throws: CancellationError.self) { try manifest.get() }
         #expect(throws: CancellationError.self) { try page.get() }
-        // The closed check comes before any range check.
+        // 閉じた後の確認は、範囲の確認より先に効く（番号が範囲外でも CancellationError）。
         let negative = await onThread { Result { try reader.page(-1) } }
         let beyond = await onThread { Result { try reader.page(9) } }
         #expect(throws: CancellationError.self) { try negative.get() }
@@ -127,6 +127,20 @@ struct StackNestBlockingReaderTests {
         let result = await onThread { Result { try reader.page(0) } }
         #expect(throws: StackNestViewerError(.cannotConnect)) { try result.get() }
         #expect(Date().timeIntervalSince(start) < 3.0)
+    }
+
+    @Test("waitLimit で戻った同期の待つ人は、待つ人の表からも取り込み中の表からも外れている")
+    func timedOutBlockingReaderIsWithdrawn() async throws {
+        let stub = StackNestStubServer(pageCount: 4)
+        let gate = stub.gate(.page(0))
+        defer { gate.open() }
+        let session = try makeSession(stub) { $0.waitLimit = .milliseconds(300) }
+        let reader = reader(session)
+        let result = await onThread { Result { try reader.page(0) } }
+        #expect(throws: StackNestViewerError(.cannotConnect)) { try result.get() }
+        #expect(session.ticketCountForTesting == 0)
+        #expect(session.waiterCountForTesting(.page(index: 0, maxWidth: nil)) == 0)
+        #expect(session.inFlightKeysForTesting.isEmpty)
     }
 
     @Test("範囲外は要求なしで .pageOutOfRange")

@@ -30,7 +30,10 @@ public struct StackNestBlockingReader: Sendable {
         self.onMisuse = onMisuse
     }
 
-    /// manifest（同期）。 / The manifest, synchronously.
+    /// manifest（同期）。閉じた後は、覚えた manifest があっても、要求なしで `CancellationError`。
+    ///
+    /// The manifest, synchronously. After `close()` it throws `CancellationError` without a request,
+    /// even if a manifest was already read.
     public func manifest(refresh: Bool = false) throws -> StackNestBookManifest {
         checkCallingThread()
         if !refresh, let cached = session.cachedManifest { return cached }
