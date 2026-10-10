@@ -14,14 +14,18 @@ let package = Package(
     products: [
         .library(name: "StackNestViewerKitCore", targets: ["StackNestViewerKitCore"]),
         .library(name: "StackNestViewerKit", targets: ["StackNestViewerKit"]),
+        .library(name: "StackNestViewerKitTesting", targets: ["StackNestViewerKitTesting"]),
     ],
     targets: [
         .target(name: "StackNestViewerKitCore", swiftSettings: [.swiftLanguageMode(.v6)]),
         .target(name: "StackNestViewerKit", dependencies: ["StackNestViewerKitCore"],
                 swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "StackNestViewerKitTesting", dependencies: ["StackNestViewerKit"],
+                swiftSettings: [.swiftLanguageMode(.v6)]),
         .testTarget(name: "StackNestViewerKitCoreTests", dependencies: ["StackNestViewerKitCore"],
                     swiftSettings: [.swiftLanguageMode(.v6)]),
-        .testTarget(name: "StackNestViewerKitTests", dependencies: ["StackNestViewerKit"],
+        .testTarget(name: "StackNestViewerKitTests",
+                    dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
                     swiftSettings: [.swiftLanguageMode(.v6)]),
     ]
 )
