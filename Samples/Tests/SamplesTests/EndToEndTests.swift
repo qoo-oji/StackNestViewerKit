@@ -42,6 +42,24 @@ struct EndToEndTests {
         #expect(!String(decoding: try server.recordsJSON(), as: UTF8.self).contains("fake-server-token"))
     }
 
+    @Test("ホストの設定にプロキシ（死んだポート・除外なし）があっても、プロキシを通らず本物のソケットへ届く")
+    func hostProxyIsNotUsed() async throws {
+        let server = try startServer()
+        defer { server.stop() }
+        var configuration = StackNestBookSession.Configuration()
+        configuration.requestTimeout = .seconds(5)
+        configuration.makeURLSessionConfiguration = {
+            let host = URLSessionConfiguration.ephemeral
+            // No exceptions key on purpose: with one, loopback would go direct and the test would prove nothing.
+            host.connectionProxyDictionary = ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 9]
+            return host
+        }
+        let session = try StackNestBookSession(contentsOf: try writeReference(try server.reference()),
+                                               configuration: configuration)
+        #expect(try await session.manifest().pageCount == 3)
+        #expect(server.receivedRequests.map(\.path) == ["manifest"])
+    }
+
     @Test("本物のソケットでも、別のポートへのリダイレクトに付いて行かない")
     func realRedirectIsRefused() async throws {
         let elsewhere = try startServer()

@@ -147,9 +147,13 @@ class FakeGh:
         self.log = test.root / "gh.log"
         gh = self.bin / "gh"
         gh.write_text('#!/bin/sh\nif [ "$1" = api ]; then echo shelfsmith; exit 0; fi\n'
-                      f'echo "$@" >> "{self.log}"\n')
+                      f'echo "$@" >> "{self.log}"\ncat > "{self.log}.stdin"\n')
         gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
         test.env["PATH"] = f"{self.bin}:{test.env['PATH']}"
+
+    def stdin(self):
+        path = Path(f"{self.log}.stdin")
+        return path.read_text() if path.exists() else ""
 
     def calls(self):
         return self.log.read_text() if self.log.exists() else ""
@@ -201,6 +205,13 @@ class GhGuardedTests(Base):
         clean = self.script("gh-guarded.sh", "gist", "create", "-", stdin="plain words\n")
         self.assertEqual(clean.returncode, 0, clean.stderr)
         self.assertIn("gist create", self.gh.calls())
+        # gh keeps its stdin semantics: it gets "-" itself and the checked body on stdin.
+        self.assertEqual(self.gh.calls().split(), ["gist", "create", "-"])
+        self.assertEqual(self.gh.stdin(), "plain words\n")
+        named = self.script("gh-guarded.sh", "gist", "create", "-f", "notes.md", "-", stdin="more words\n")
+        self.assertEqual(named.returncode, 0, named.stderr)
+        self.assertTrue(self.gh.calls().strip().endswith("gist create -f notes.md -"), self.gh.calls())
+        self.assertEqual(self.gh.stdin(), "more words\n")
 
 
 class TagAndTrailerTests(Base):

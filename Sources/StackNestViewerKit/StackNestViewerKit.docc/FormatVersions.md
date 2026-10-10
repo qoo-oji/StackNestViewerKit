@@ -28,11 +28,13 @@ While the kit is 0.x, breaking changes bump the minor version, so pin to the nex
 version is a minor change; dropping one is a major change. The `kit=` parameter of the identification header tells
 StackNest which kit version a viewer uses.
 
+公開の enum（`StackNestReadingDirection`・`StackNestLanguage`・`StackNestRequestPriority`・
+`StackNestViewerSupport.Issue`、Testing の `Route`・`Response`）は、0.x の minor でケースが増えることがある。`switch` には
+`default` を書く。
+
 Public enums (`StackNestReadingDirection`, `StackNestLanguage`, `StackNestRequestPriority`,
 `StackNestViewerSupport.Issue`, and the Testing target's `Route` and `Response`) may gain cases in a 0.x minor
 version, so switch with a `default` case.
-
-公開の enum は、0.x の minor でケースが増えることがある。`switch` には `default` を書く。
 
 ```swift
 import StackNestViewerKit

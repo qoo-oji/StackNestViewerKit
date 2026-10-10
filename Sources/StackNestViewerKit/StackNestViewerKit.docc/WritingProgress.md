@@ -20,11 +20,12 @@ locked, host not allowed) nothing more is sent for that book. The same kind of f
 after `close()` (or after the quit-time ``StackNestProgressRegistry/flushAll(timeout:completion:)`` has closed the
 reporter) is ignored.
 
-If another quit handler vetoes the quit after `flushAll`, the reporters stay closed and later `note(page:)` calls are
-ignored. Create new reporters for the books that are still open.
+`flushAll` は、未送信のあった報告者を閉じる。その後に別の処理が終了を取り消すと、閉じた報告者は閉じたままで、その後の
+`note(page:)` は無視される。どれが閉じたかは分からないので、まだ開いている本の報告者を作り直すこと。
 
-`flushAll` の後に別の処理が終了を取り消すと、報告者は閉じたままで、その後の `note(page:)` は無視される。まだ開いている本の
-報告者を作り直すこと。
+`flushAll` closes the reporters that had unsent work. If another quit handler then vetoes the quit, those reporters stay
+closed and later `note(page:)` calls on them are ignored. You can't tell which ones were closed, so create new
+reporters for the books that are still open.
 
 ## 終了時 / At Quit
 

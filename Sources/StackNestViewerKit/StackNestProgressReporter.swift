@@ -48,7 +48,7 @@ public final class StackNestProgressReporter {
     public private(set) var isStopped = false
 
     /// セッションへ書き戻す役を作り、`StackNestProgressRegistry.shared` に弱い参照で載せる（終了時の送り切りのため）。
-    /// 役は（閉じた後も）手放されるまでセッションを強く持つ。
+    /// 役は（閉じた後も）手放されるまでセッションを強く持つので、本を閉じたら役も手放すこと。
     ///
     /// Creates a reporter that posts to `session` and registers it (weakly) with
     /// `StackNestProgressRegistry.shared` for the quit-time flush. It keeps the session alive for as long as the reporter itself

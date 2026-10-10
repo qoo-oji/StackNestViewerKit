@@ -74,6 +74,23 @@ struct StackNestSessionRequestTests {
         await #expect(throws: expected) { try await session.manifest() }
     }
 
+    static let routeFailureCases: [(StackNestStubServer.Route, Int, StackNestViewerError)] = [
+        (.progress, 404, StackNestViewerError(.bookNotFound)),
+        (.progress, 401, StackNestViewerError(.unauthorized)),
+        (.cover, 404, StackNestViewerError(.httpStatus, statusCode: 404)),
+        (.cover, 401, StackNestViewerError(.unauthorized)),
+    ]
+
+    @Test("要求の種類ごとの振り分け（進捗の 404 は本が無い。表紙の 404 は本が無いとは限らない）", arguments: routeFailureCases)
+    func routeFailureMapping(route: StackNestStubServer.Route, status: Int, expected: StackNestViewerError) async throws {
+        let stub = StackNestStubServer()
+        stub.respond(route, with: .status(status))
+        let session = try makeSession(stub)
+        await #expect(throws: expected) {
+            if route == .progress { try await session.postProgress(page: 1) } else { _ = try await session.cover() }
+        }
+    }
+
     @Test("manifest の JSON が読めなければ .invalidResponse")
     func brokenManifest() async throws {
         let stub = StackNestStubServer()

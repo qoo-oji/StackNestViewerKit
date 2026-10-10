@@ -88,13 +88,14 @@ minor release can break the API, so stay within one minor version.
    Take a decoding slot after the bytes arrive, and promote joined display requests in your slot queue.
 7. **書き戻し / Progress**: `StackNestProgressReporter` に `note(page:)` を渡し、閉じるときに `close()`。`close()` の後
    （と、終了時の `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` が報告者を閉じた後）の
-   `note(page:)` は無視される。`applicationShouldTerminate` の例は DocC の「Writing Progress」。
+   `note(page:)` は無視される。`applicationShouldTerminate` の例は DocC の「Writing Progress」。`flushAll` は未送信のあった報告者を閉じる。別の処理が
+   終了を取り消したら、閉じた報告者は閉じたままなので、まだ開いている本の報告者を作り直す。
    Pass `note(page:)` to a `StackNestProgressReporter` and call `close()` when done; `note(page:)` after `close()` (or
-   after the quit-time flush has closed the reporter) is ignored. If another quit handler vetoes the quit after the
-   flush, create new reporters for the books that are still open.
-   終了を別の処理が取り消したら、まだ開いている本の報告者を作り直す。 At quit, call
+   after the quit-time flush has closed the reporter) is ignored. At quit, call
    `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` (from `applicationShouldTerminate`; see "Writing
-   Progress" in the DocC) so the last position is not lost.
+   Progress" in the DocC) so the last position is not lost. `flushAll` closes the reporters that had unsent work. If
+   another quit handler vetoes the quit, those reporters stay closed, so create new reporters for the books that are
+   still open.
 8. **同期の読み手 / Blocking readers**: 同期の API を持つビューアは、ブロックしてよいスレッドから
    `StackNestBlockingReader` を呼ぶ（メインスレッドや協調スレッドからは呼ばない）。
    If your viewer has a blocking API, call `StackNestBlockingReader` only from a thread that may block (never the main
@@ -167,6 +168,7 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
 ## セキュリティ / Security
 
 - つなぐのは既定で `127.0.0.1` と `::1` だけ。リダイレクトには付いて行かず、鍵は `book` の宛先にだけ送る。
+- プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵がプロキシへ渡ることはない。
 - 鍵はメモリの中だけ。`StackNestBookReference` は `Codable` ではなく、説明・`dump` では伏せる。
 - 本文は 64 MiB まで、期限は要求のたびに確かめ、`URLSession` はキャッシュ・クッキー・資格情報の保管を持たない。
 - `waitLimit`（既定 25 秒）は要求ごとに数える。async の顔も同期の顔も、1 回の呼び出しは要求を最大 3 件（範囲の確かめ・
@@ -178,7 +180,6 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
 
 - Connects only to `127.0.0.1` and `::1` by default; refuses redirects; sends the token only to the `book` origin.
 - Never uses a proxy (system and PAC proxies are disabled), so the token can't reach one.
-  プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵は `book` の宛先にだけ送られる。
 - Keeps the token in memory only; `StackNestBookReference` isn't `Codable` and redacts the token.
 - Caps bodies at 64 MiB, checks expiry before every request, and uses no cache, cookie or credential storage.
 - `waitLimit` (25 seconds by default) is counted per request. A single async or blocking call can make up to three
