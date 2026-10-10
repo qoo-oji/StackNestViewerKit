@@ -70,6 +70,18 @@ Swift のビューアは、ここに書いたことをすべて実装した Stac
 | `startPage` | 整数（0 始まり） | 開いた時点の読書位置。ここから開く |
 
 - 知らない項目は読み飛ばしてください（後の版で項目が増えても開けるように）。
+- `title` と `direction` は無くても開きます。`title` が無ければ空の題名として扱い、`direction` が無い、または `"rtl"`・`"ltr"` 以外の値なら参照ファイルの向きは使いません（開いた後の読む方向は `manifest` の `direction` に従います）。それ以外の項目（`format`・`version`・`book`・`token`・`expiresAt`・`pageCount`・`startPage`）が無い、または型が違うファイルは開きません。
+- 読み手は次のファイルを**断ります**（利用者には「StackNest から開き直してください」と案内してください）。
+  - 大きさが 1 MiB（1,048,576 バイト）を超える、または JSON のオブジェクトとして読めない
+  - `format` が `stacknest-book-reference` でない、`version` が 1 未満（壊れたファイル）、または読めない版（新しい版。「アプリを更新してください」と案内してよい）
+  - `book` が `http`・`https` 以外のスキーム、空のホスト、問い合わせ（`?`）、断片（`#`）、資格情報（`user:pw@`）のどれかを持つ。問い合わせや断片があると、後ろへ足す `manifest` などが飲まれて別の宛先の要求になり、資格情報は宛先の取り違えの種になるため
+  - `token` が空、または `b64token` の文字以外を含む（`=` だけの並びも断る）
+  - `expiresAt` が読めない形（時差の無い時刻など）
+  - `pageCount` が整数でない、負、または 100,000 を超える（0 は許す）
+  - `startPage` が整数でない、または負。範囲の外の正の値は断らず、`0` から `pageCount - 1` に収めて開く
+  - 期限（`expiresAt`）を過ぎている
+- 形式の検査は、`book` のホストを絞りません（LAN や IPv6 のアドレスも形式としては正しい）。接続先を絞るかどうかは読み手の判断です（StackNestViewerKit は既定で 127.0.0.1 と `::1` にだけつなぎます。下の「ビューアへのお願い」）。
+- [Samples](Samples) で、`reference-v1`・`reference-v1-unknown-keys`・`reference-expired`・`reference-lan-host`・`reference-ipv6-zone` は形式としては読めます（`reference-expired` は期限切れとして、`reference-lan-host` と `reference-ipv6-zone` は既定の宛先の制限で、StackNestViewerKit は開きません）。`reference-credentials`（資格情報つき）・`reference-malformed`（壊れた JSON）・`reference-v2`（読めない版）は断ります。
 - ローカルの書庫の本では `book` が `http://127.0.0.1:<port>/api/v1/libraries/<lib>/books/<id>` になります（その Mac の中だけで待ち受ける口）。
 - **リモートの書庫の本も、`book` は `http://127.0.0.1:<port>/api/v1/relay/<relayID>` になります**（試用）。StackNest がこの口で受けた要求を、リモートのサーバへ中継します。実測では、サンドボックスのビューアが `NSAllowsLocalNetworking` の下で届くのは 127.0.0.1 とプライベートのアドレスまでで、Tailscale のアドレス（100.64.0.0/10）や公開のアドレスへの平文の HTTP は App Transport Security に止められます。そのため StackNest がリモートの本を中継し、ビューアはいつも手元の 127.0.0.1 につなげば済むようにしています。下の 4 つの API はローカルの本と同じで、ビューアは `book` の形を見分ける必要はありません。リモートのサーバの鍵はビューアには渡りません（参照ファイルの `token` は中継用の鍵で、`expiresAt` は発行から 30 日とリモートの鍵の期限の早い方です）。
 - この口は StackNest が起動していて設定が ON のあいだだけ動き、ポートも変わることがあります。接続を拒まれたら、「StackNest から開き直してください」と表示してください。StackNest を終了すると中継は消えるので、その後の要求は **401** になります（中継の期限が切れたときも同じです。「StackNest から開き直してください」と表示してください）。中継の取り次ぎでリモートのサーバに届かない・応答が大きすぎる・リダイレクトされたときは **502** です。中継の `progress` に 64 KiB を超える本文を送ると **413** で、リモートには取り次ぎません。リモートの応答（403・404 や `X-Library-Locked` を含む）はそのまま返します。リモートが中継を **401・403** で断ったら（パスワードの変更・接続の取り消しなど）、StackNest はその応答を返したうえで中継を閉じるので、以後の要求はキャッシュにあるページも含めて **401** になります（「StackNest から開き直してください」と表示してください）。
