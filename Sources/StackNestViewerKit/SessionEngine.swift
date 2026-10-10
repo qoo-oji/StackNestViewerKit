@@ -232,7 +232,7 @@ extension StackNestBookSession {
     }
 
     /// 応答の振り分け。401 → `.unauthorized`／403＋`X-Library-Locked: 1` → `.libraryLocked`／ほかの 403 →
-    /// `.unauthorized`／ページの 404 → 顔で振り分け／ほかの 404 → `.bookNotFound`／502 → `.remoteUnavailable`／
+    /// `.unauthorized`／ページの 404 → 顔で振り分け／表紙の 404 → `.httpStatus`（本はあるが表紙が無いことがある。恒久にしない）／ほかの 404 → `.bookNotFound`／502 → `.remoteUnavailable`／
     /// ほかの 3xx・4xx・5xx → `.httpStatus`。
     static func classify(_ outcome: ResponseSink.Outcome, for key: RequestKey) -> Result<FetchedResponse, any Error> {
         // 上限を超えて自分で打ち切ったときは、その取り消しの失敗ではなく「応答が大きすぎる」。
@@ -248,6 +248,8 @@ extension StackNestBookSession {
             return .failure(StackNestViewerError(outcome.libraryLocked ? .libraryLocked : .unauthorized))
         case 404:
             if case .page = key { return .failure(PageNotFound()) }
+            // A missing cover image also answers 404 while the book exists, so it is not a permanent failure.
+            if case .cover = key { return .failure(StackNestViewerError(.httpStatus, statusCode: 404)) }
             return .failure(StackNestViewerError(.bookNotFound))
         case 502:
             return .failure(StackNestViewerError(.remoteUnavailable))

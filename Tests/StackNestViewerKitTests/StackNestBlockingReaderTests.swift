@@ -29,6 +29,23 @@ struct StackNestBlockingReaderTests {
         StackNestBlockingReader(session: session, isCancelled: { flag.isRaised }, onMisuse: { misuse.add($0) })
     }
 
+    @Test("同期の顔でも、ページの 404 は manifest を読み直して振り分ける（同じ数なら 404、減っていれば範囲外）")
+    func blockingPageNotFoundIsClassified() async throws {
+        let odd = StackNestStubServer(pageCount: 3)
+        odd.respond(.page(1), with: .status(404))
+        let oddReader = reader(try makeSession(odd))
+        let oddResult = await onThread { Result { try oddReader.page(1) } }
+        #expect(throws: StackNestViewerError(.httpStatus, statusCode: 404)) { try oddResult.get() }
+
+        let shrunk = StackNestStubServer(pageCount: 3)
+        let session = try makeSession(shrunk)
+        let shrunkReader = reader(session)
+        shrunk.respond(.page(2), with: .status(404))
+        shrunk.setPageCount(2)
+        let shrunkResult = await onThread { Result { try shrunkReader.page(2) } }
+        #expect(throws: StackNestViewerError(.pageOutOfRange, pageCount: 2)) { try shrunkResult.get() }
+    }
+
     @Test("manifest とページを同期で読む（専用のスレッドからなら誤りの知らせは出ない）")
     func readsManifestAndPages() async throws {
         let stub = StackNestStubServer(pageCount: 4)

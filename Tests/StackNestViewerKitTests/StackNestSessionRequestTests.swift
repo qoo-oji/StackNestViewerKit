@@ -193,10 +193,13 @@ struct StackNestSessionRequestTests {
         let stub = StackNestStubServer()
         let host = URLSessionConfiguration.default
         host.protocolClasses = [] // 何を返しても外す
+        // A host-supplied proxy (dead port) must not survive hardening.
+        host.connectionProxyDictionary = ["HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 9]
         let session = try makeSession(stub) { $0.makeURLSessionConfiguration = { host } }
         // ホストの設定は書き換えない（コピーに手を入れる）。
         #expect(host.urlCache != nil)
         #expect(host.httpCookieStorage != nil)
+        #expect(host.connectionProxyDictionary?.isEmpty == false)
         #expect(host.timeoutIntervalForResource == URLSessionConfiguration.default.timeoutIntervalForResource)
         let configuration = session.urlSessionConfigurationForTesting
         #expect(configuration.urlCache == nil)
@@ -204,6 +207,7 @@ struct StackNestSessionRequestTests {
         #expect(configuration.urlCredentialStorage == nil)
         #expect(configuration.httpShouldSetCookies == false)
         #expect(configuration.waitsForConnectivity == false)
+        #expect(configuration.connectionProxyDictionary?.isEmpty == true, "プロキシは使わない（鍵は book の宛先にだけ送る）")
         #expect(configuration.requestCachePolicy == .reloadIgnoringLocalCacheData)
         #expect(configuration.timeoutIntervalForResource == 30, "waitLimit 25 秒＋上乗せ 5 秒（待つ人のいない先読みの歯止め）")
     }

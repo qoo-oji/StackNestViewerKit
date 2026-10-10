@@ -171,6 +171,22 @@ struct StackNestSessionPageTests {
         #expect(stub.requests.map(\.route) == [.manifest, .page(9)])
     }
 
+    @Test("表紙の 404 は恒久の失敗にならない（本はあるが表紙が無いことがある。先読みも止まらない）")
+    func coverNotFoundIsNotPermanent() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        stub.respond(.cover, with: .status(404))
+        let session = try makeSession(stub)
+        do {
+            _ = try await session.cover()
+            Issue.record("cover() should have thrown")
+        } catch let error as StackNestViewerError {
+            #expect(error == StackNestViewerError(.httpStatus, statusCode: 404))
+            #expect(error.isPermanent == false)
+        }
+        session.prefetch([1, 2])
+        #expect(await waitUntil { stub.requestCount(.page(1)) == 1 && stub.requestCount(.page(2)) == 1 })
+    }
+
     @Test("範囲内の 404 は manifest を読み直して振り分ける（本が無い・ページ数が減った・それ以外）")
     func pageNotFoundIsClassified() async throws {
         let gone = StackNestStubServer(pageCount: 3)

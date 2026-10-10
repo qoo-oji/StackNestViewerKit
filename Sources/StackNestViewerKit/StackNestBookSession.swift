@@ -338,6 +338,8 @@ public final class StackNestBookSession: @unchecked Sendable {
         configuration.urlCredentialStorage = nil
         // つながらないときは待たずに失敗させる（「StackNest から開き直してください」を早く出す）。
         configuration.waitsForConnectivity = false
+        // Never use a proxy: an empty dictionary disables system and PAC proxies, so the token goes only to the book origin.
+        configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForResource = (waitLimit + resourceTimeoutMargin).timeInterval
         return configuration
     }
