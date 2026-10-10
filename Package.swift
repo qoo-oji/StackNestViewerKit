@@ -27,5 +27,9 @@ let package = Package(
         .testTarget(name: "StackNestViewerKitTests",
                     dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
                     swiftSettings: [.swiftLanguageMode(.v6)]),
+        // 協調スレッドを飽和させる試験だけを置く（環境変数 STACKNEST_KIT_POOL_TEST=1 のときだけ走る。単独で走らせる）。
+        .testTarget(name: "StackNestViewerKitPoolTests",
+                    dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
+                    swiftSettings: [.swiftLanguageMode(.v6)]),
     ]
 )

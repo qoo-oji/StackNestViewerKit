@@ -16,11 +16,13 @@ public final class StackNestBookSession: @unchecked Sendable {
     public struct Configuration: Sendable {
         /// 1 回の要求の無通信の時間切れ（`URLRequest.timeoutInterval`）。 / Per-request idle timeout.
         public var requestTimeout: Duration = .seconds(20)
-        /// 待つ側の上限。async の顔も同期の顔も、呼んでからこの時間で必ず戻る（`.cannotConnect`）。少しずつ流れ続ける
-        /// 応答や、要求が出るまでの待ちも含めて数える。
+        /// 待つ側の上限。async の顔も同期の顔も、1 件の要求ごとに、呼んでからこの時間で必ず戻る（`.cannotConnect`）。
+        /// 少しずつ流れ続ける応答や、要求が出るまでの待ちも含めて数える。呼び出し全体の上限ではない（ページの読み出しは
+        /// 最大 3 件の要求を出すことがある）。
         ///
-        /// The waiting side's limit: both the async and the blocking calls return within this time of the call
-        /// (with `.cannotConnect`), counting slow trickling responses and any queueing.
+        /// The waiting side's limit: each request, whether through the async or the blocking face, returns within
+        /// this time of being issued (with `.cannotConnect`), counting slow trickling responses and any queueing.
+        /// It bounds each request, not the whole call (a page read can make up to three requests).
         public var waitLimit: Duration = .seconds(25)
         /// 1 応答の本文の上限。 / The body size limit of one response.
         public var maxResponseBytes = 64 << 20
