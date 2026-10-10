@@ -181,6 +181,12 @@ public final class StackNestProgressReporter {
             lastSentPage = nil
             if pendingPage == nil { pendingPage = page }
         }
+        // 止まっているのが失敗したページそのもの（より新しいページが無い）なら、まとめ待ちを残さない。
+        // 残すと、失敗の後に次の合図が無くても同じページを送り直してしまう。
+        if pendingPage == page {
+            debounceTask?.cancel()
+            debounceTask = nil
+        }
         guard let failure = error as? StackNestViewerError else { return }
         if failure.isPermanent { isStopped = true }
         guard failure.noticeKind != lastNotice else { return }

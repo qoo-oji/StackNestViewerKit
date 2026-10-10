@@ -140,6 +140,37 @@ struct StackNestProgressReporterTests {
         #expect(sent.pages == [2])
     }
 
+    @Test("失敗したページが再び止まっていても、まとめ待ちが残っていて自分で送り直さない（次の note・flush・close を待つ）")
+    func failedPageNotedAgainIsNotResentOnItsOwn() async {
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1)
+        let log = FailureLog()
+        let progress = reporter(sent, debounce: .milliseconds(150), maxWait: .seconds(5), log: log)
+        progress.note(page: 1)
+        progress.flush()
+        progress.note(page: 2)
+        progress.note(page: 1) // 1 番の送信は飛んでいる。まとめ待ちは 150 ms でやり直し。
+        while log.failures.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        try? await Task.sleep(for: .milliseconds(400)) // まとめ待ちが残っていれば、とうに発火している
+        #expect(sent.attemptCount == 1)
+        #expect(progress.hasUnsentWork, "止まったページは残っている")
+        progress.flush()
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [1])
+        #expect(sent.attemptCount == 2)
+    }
+
+    @Test("失敗の後に、より新しいページが止まっていれば、まとめ待ちの後にそちらを送る")
+    func newerPageStillGoesOutAfterAFailure() async {
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1)
+        let progress = reporter(sent, debounce: .milliseconds(150), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        progress.note(page: 2)
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [2])
+        #expect(sent.attemptCount == 2)
+    }
+
     /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔を返す
     /// （眠りが粗い機でも、間隔がまとめ待ちより短いことを試験の前提として確かめる）。
     private func turnPages(_ progress: StackNestProgressReporter, for span: Duration) async -> (last: Int, longestGap: Duration) {
