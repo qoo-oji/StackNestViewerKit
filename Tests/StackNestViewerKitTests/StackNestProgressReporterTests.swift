@@ -140,17 +140,58 @@ struct StackNestProgressReporterTests {
         #expect(sent.pages == [2])
     }
 
-    @Test("続けてページを送り続けても、まとめ待ちの最長で送る")
-    func maxWaitSendsWhileKeepingTurningPages() async {
-        let sent = ScriptedSend()
-        let progress = reporter(sent, debounce: .milliseconds(100), maxWait: .milliseconds(150))
-        for page in 1...20 {
+    /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔を返す
+    /// （眠りが粗い機でも、間隔がまとめ待ちより短いことを試験の前提として確かめる）。
+    private func turnPages(_ progress: StackNestProgressReporter, for span: Duration) async -> (last: Int, longestGap: Duration) {
+        let start = ContinuousClock.now
+        var previous = start
+        var longestGap = Duration.zero
+        var page = 0
+        while ContinuousClock.now - start < span {
+            page += 1
+            let now = ContinuousClock.now
+            longestGap = max(longestGap, now - previous)
+            previous = now
             progress.note(page: page)
             try? await Task.sleep(for: .milliseconds(25))
         }
-        #expect(sent.pages.count >= 1)
+        return (page, longestGap)
+    }
+
+    @Test("ページを送るたびに、まとめ待ちをやり直す")
+    func debounceRestartsOnEveryNote() async {
+        let sent = ScriptedSend()
+        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .seconds(60))
+        let (last, longestGap) = await turnPages(progress, for: .seconds(1))
+        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
+        #expect(sent.attemptCount == 0)
         await progress.waitUntilIdle()
-        #expect(sent.pages.last == 20)
+        #expect(sent.pages == [last])
+    }
+
+    @Test("続けてページを送り続けても、まとめ待ちの最長で送る")
+    func maxWaitSendsWhileKeepingTurningPages() async {
+        let sent = ScriptedSend()
+        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .milliseconds(200))
+        let (last, longestGap) = await turnPages(progress, for: .seconds(1))
+        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
+        #expect(sent.attemptCount >= 1)
+        await progress.waitUntilIdle()
+        #expect(sent.pages.last == last)
+    }
+
+    @Test("閉じた後の note は無視する（閉じる間に先頭へ戻っても、保存した位置を上書きしない）")
+    func noteAfterCloseIsIgnored() async {
+        let sent = ScriptedSend()
+        let progress = reporter(sent)
+        progress.note(page: 5)
+        progress.close()
+        progress.note(page: 0)
+        progress.flush()
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [5])
+        #expect(sent.attemptCount == 1)
+        #expect(!progress.hasUnsentWork)
     }
 
     @Test("閉じるときに飛んでいた送信が失敗しても、止まっていた新しいページを 1 度だけ試す")

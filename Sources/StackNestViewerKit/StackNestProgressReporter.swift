@@ -10,6 +10,8 @@ import Foundation
 /// - 恒久的な失敗（`isPermanent`）の後は、その本については送らない。
 /// - 知らせは種類（`noticeKind`）ごとに 1 度。送れたら記憶を消す。
 /// - 開いたページ（`startPage`）と、送った（送っている）ページは送らない。
+/// - 書き戻すのは StackNest のページ番号で、ビューアー自身の一覧の位置ではない。
+/// - `close()` の後の `note(page:)` は無視する。
 ///
 /// Writes the reading position back to StackNest (one per open book). Main-actor isolated, so the order of
 /// calls is the order of sends. Batches for 3 seconds (at most 10), keeps one send in flight and only the
@@ -23,9 +25,11 @@ public final class StackNestProgressReporter {
         public var debounce: Duration = .seconds(3)
         /// 最初に止まってから、これを超えては待たない。 / The longest wait from the first pending change.
         public var maxWait: Duration = .seconds(10)
+        /// 既定のまとめ（3 秒・最長 10 秒）。 / The defaults (3 seconds, at most 10).
         public init() {}
     }
 
+    /// 1 ページ分の送り先（StackNest のページ番号を受け取る）。 / The sender for one page (takes a StackNest page number).
     public typealias Send = @Sendable (Int) async throws -> Void
 
     private let timing: Timing
@@ -39,6 +43,7 @@ public final class StackNestProgressReporter {
     private var firstPendingAt: ContinuousClock.Instant?
     private var closeDeferred = false
     private var retriedAfterClose = false
+    private var isClosed = false
     /// 恒久的な失敗の後（送らない）。 / True after a permanent failure (nothing more is sent).
     public private(set) var isStopped = false
 
@@ -75,10 +80,12 @@ public final class StackNestProgressReporter {
     }
 
     /// 今いるページ（StackNest のページ番号）。まとめ待ちをやり直す。負の値は無視する。
+    /// `close()` の後は無視する（閉じる間に先頭へ戻るビューアーが、保存した位置を上書きしないため）。
     ///
     /// The current page (a StackNest page number). Restarts the batching wait. Negative values are ignored.
+    /// Ignored after `close()` (so a viewer resetting to page 0 while closing cannot overwrite the saved position).
     public func note(page: Int) {
-        guard !isStopped, page >= 0 else { return }
+        guard !isStopped, !isClosed, page >= 0 else { return }
         if page == lastSentPage, pendingPage == nil { return }
         pendingPage = page
         let now = ContinuousClock.now
@@ -105,12 +112,13 @@ public final class StackNestProgressReporter {
 
     /// 閉じるとき: 今すぐ送る。飛んでいる送信があれば、それが終わってから止まっていたページを送り、閉じる前から
     /// 飛んでいた送信が失敗したら、止まっていた新しいページを 1 度だけ試す（閉じた後は次の合図が来ないため）。
-    /// 役は送り切るまで自分を保つ。
+    /// 役は送り切るまで自分を保つ。閉じた後の `note(page:)` は無視する。
     ///
     /// On close: sends now. If a send was in flight, the waiting page goes after it; if that earlier send fails,
-    /// the newer page is tried once. The reporter keeps itself alive until done.
+    /// the newer page is tried once. The reporter keeps itself alive until done. `note(page:)` is ignored afterwards.
     public func close() {
         guard !isStopped else { return }
+        isClosed = true
         if inFlight != nil, pendingPage != nil { closeDeferred = true }
         flush()
     }
