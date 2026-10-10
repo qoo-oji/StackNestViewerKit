@@ -31,6 +31,10 @@ StackNest を入れていなくても、手元の偽の StackNest で試せる�
 
 You can try it without StackNest, using a local fake server.
 
+Samples パッケージ（このクイックスタートと端から端の試験）は Swift 6.2（Xcode 26）以降が要る。部品そのものは Swift 6.1 から。
+The Samples package (this quick start and the end-to-end tests) needs Swift 6.2 (Xcode 26) or later; the kit itself
+builds with Swift 6.1 or later.
+
 ```sh
 swift run --package-path Samples stacknest-fake-server \
     --folder ~/Pictures/SomeBook --reference-out /tmp/Book.stacknestbook --record-out /tmp/requests.json
@@ -52,12 +56,12 @@ The fake server records the requests it receives.
 .package(url: "https://github.com/shelfsmith/StackNestViewerKit", .upToNextMinor(from: "0.1.0"))
 ```
 
-アプリのターゲットは `StackNestViewerKit`、試験のターゲットは `StackNestViewerKitTesting` に依存する（テストの偽サーバは、そこから作ったセッションが生きている間は生きるので、
-セッションだけを返す補助でもよい）。0.x の間は
+アプリのターゲットは `StackNestViewerKit`、試験のターゲットは `StackNestViewerKitTesting` に依存する（`StackNestStubServer` の `configuration()` で作ったセッションは
+見立てを生かしておくので、セッションだけを返す補助でもよい）。0.x の間は
 minor の版で壊す変更がありうるので、次の minor までにとどめる。
 
-Depend on `StackNestViewerKit` from the app and `StackNestViewerKitTesting` from tests (a session built from the
-stub's configuration keeps the stub alive, so a helper may return only the session). While the version is 0.x a
+Depend on `StackNestViewerKit` from the app and `StackNestViewerKitTesting` from tests (a session built from
+`StackNestStubServer`'s `configuration()` keeps the stub alive, so a helper may return only the session). While the version is 0.x a
 minor release can break the API, so stay within one minor version.
 
 ## 統合の手引き / Integration Guide
@@ -72,8 +76,11 @@ minor release can break the API, so stay within one minor version.
    you widen `allowedHosts`.
 3. **開く / Open**: `StackNestBookSession(contentsOf:)` は参照ファイルを同期に読む。応答しないボリュームの上にありうる
    なら、ブロックしてよいスレッドで作る。最初に `manifest()` を読む。
-   `StackNestBookSession(contentsOf:)` reads the file synchronously; read `manifest()` first.
-4. **ページ / Pages**: `page(_:)` の番号は StackNest のページ番号。`contentType` で形式を見る。
+   `StackNestBookSession(contentsOf:)` reads the file synchronously; if it could be on an unresponsive volume, create
+   the session on a thread that may block. Read `manifest()` first.
+4. **ページ / Pages**: `page(_:)` の番号は StackNest のページ番号（ビューアの一覧の位置ではない）。`contentType` で形式を見る。
+   The number passed to `page(_:)` is StackNest's page number (not a position in your own list); check `contentType`
+   for the format.
 5. **先読み / Prefetch**: `prefetch(_:)` には読む向きの近いページから渡す。
    Pass pages nearest in reading direction first.
 6. **解読の枠 / Decoding slots**: バイト列を取り終えてから解読の枠を取る。先読みの取り中のページに表示の要求が
@@ -83,10 +90,16 @@ minor release can break the API, so stay within one minor version.
    （と、終了時の `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` が報告者を閉じた後）の
    `note(page:)` は無視される。`applicationShouldTerminate` の例は DocC の「Writing Progress」。
    Pass `note(page:)` to a `StackNestProgressReporter` and call `close()` when done; `note(page:)` after `close()` (or
-   after the quit-time flush has closed the reporter) is ignored.
+   after the quit-time flush has closed the reporter) is ignored. At quit, call
+   `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` (from `applicationShouldTerminate`; see "Writing
+   Progress" in the DocC) so the last position is not lost.
 8. **同期の読み手 / Blocking readers**: 同期の API を持つビューアは、ブロックしてよいスレッドから
-   `StackNestBlockingReader` を呼ぶ。
+   `StackNestBlockingReader` を呼ぶ（メインスレッドや協調スレッドからは呼ばない）。
+   If your viewer has a blocking API, call `StackNestBlockingReader` only from a thread that may block (never the main
+   thread or the cooperative pool).
 9. **エラー / Errors**: `switch error.code { … default: … }` で受け、残りは `error.message()` の英日の文言に任せる。
+   Catch with `switch error.code { … default: … }` (the code is an open set) and leave the rest to the English and
+   Japanese text of `error.message()`.
 10. **ライブラリの機能（推奨） / Library features (recommended)**: 鍵を保存しない。本の同一性は参照ファイルのパスで取る（`book`
     の URL は開くたびに変わることがある）。参照ファイルの本はコレクション・書き出し・メタデータに入れない（期限が
     切れると読めなくなり、StackNest が参照ファイルを消す）。
@@ -157,7 +170,7 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
 - `waitLimit`（既定 25 秒）は要求ごとに数える。async の顔も同期の顔も、1 回の呼び出しは要求を最大 3 件（範囲の確かめ・
   ページ・404 の後の読み直し）出しうるので、最悪で `waitLimit` の 3 倍まで待ってから `.cannotConnect` で戻る。
 - 名乗り（`X-StackNest-Viewer`）は StackNest の読み方と同じ厳しさで読む（bundle id は 64 文字まで・使える文字は限る。
-  不正な `kit=` は捨てる）。
+  不正な `kit=` は捨てる）。送る値も同じ規則に整える。
 - 参照ファイルを断る規則は形式の文書にある（[日本語](Documentation/BookReferenceFormat.md)・
   [English](Documentation/BookReferenceFormat.en.md)）。
 
@@ -168,14 +181,17 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
   requests (range check, the page, a manifest re-read after a 404), so in the worst case it waits up to three times
   `waitLimit` before returning `.cannotConnect`.
 - The identification header (`X-StackNest-Viewer`) is parsed as strictly as StackNest does (bundle id up to 64
-  characters from a limited character set; an invalid `kit=` is dropped).
-- The rules for refusing a reference file are in the format documents linked above.
+  characters from a limited character set; an invalid `kit=` is dropped); the value the kit sends is reduced to the same rules.
+- The rules for refusing a reference file are in the format document
+  ([English](Documentation/BookReferenceFormat.en.md)).
 
 ## 動作環境 / Requirements
 
 - macOS 14 以降 / macOS 14 or later (arm64・x86_64)
 - Swift 6.1 以降（`swift-tools-version: 6.0`・Swift 6 の言語モード）。CI は Swift 6.1 から確かめる。
 - Swift 6.1 or later (`swift-tools-version: 6.0`, Swift 6 language mode); CI checks from Swift 6.1.
+- Samples パッケージ（すぐに試す・端から端の試験）は Swift 6.2（Xcode 26）以降。
+  The Samples package (quick start, end-to-end tests) needs Swift 6.2 (Xcode 26) or later.
 
 ## 版の方針 / Versioning
 
@@ -208,22 +224,22 @@ Maintainers enable the hooks in every new clone and check the identifier list ex
 
 ```sh
 git config core.hooksPath Scripts/githooks
-test -s ~/.config/stacknest/private-identifiers && echo "identifier list present"
+grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && echo "identifier list present"
 ```
 
-番人は失敗したら通さない側に倒れる。pre-push は、push 先にまだ無いコミットだけを検査し、push する ref の名前と注釈付き
-タグのメッセージも検査する。`Scripts/gh-guarded.sh` は、会話の URL や内部の印を含む投稿を断る。
+番人は失敗したら通さない側に倒れる。pre-push は、push する先端のファイル全体と、push 先にまだ無いコミットの足した行・メッセージ・
+作成者を検査し、push する ref の名前と注釈付きタグのメッセージも検査する。`Scripts/gh-guarded.sh` は、会話の URL や内部の印を含む投稿を断る。
 
-The guards fail closed. The pre-push hook checks only the commits not already on the push target, plus the pushed
-ref names and annotated tag messages; `Scripts/gh-guarded.sh` refuses posts that contain session URLs or internal
+The guards fail closed. The pre-push hook scans the whole tree at the pushed tip plus the added lines, messages and authors of
+the commits not yet on the push target, and also the pushed ref names and annotated tag messages; `Scripts/gh-guarded.sh` refuses posts that contain session URLs or internal
 markers.
 
 ## 貢献の決まり / Contributing
 
 - コミットの末尾に付けるのは `Co-Authored-By:` の行だけ。`Claude-Session:` の行（会話の URL）は付けない（フックが止める）。
   End commits with `Co-Authored-By:` only; never add a `Claude-Session:` line (the hooks refuse it).
-- コード・文書・コミットに、人名・ホームのパス・内部の作業の番号を書かない（`Scripts/internal-markers.txt` の語彙を
-  pre-push が止める）。
+- コード・文書・コミットに、人名・ホームのパス・内部の作業の番号を書かない（内部の印は `Scripts/internal-markers.txt`、人名などは
+  リポジトリの外の検査語の一覧で、pre-push が止める）。
   Keep personal names, home paths and internal work IDs out of code, docs and commits.
 - 利用者に見える変更は `CHANGELOG.md` の `[Unreleased]` に日英で書く。詳しくは [CONTRIBUTING.md](CONTRIBUTING.md)。
   Record user-visible changes under `[Unreleased]` in Japanese and English. See [CONTRIBUTING.md](CONTRIBUTING.md).
