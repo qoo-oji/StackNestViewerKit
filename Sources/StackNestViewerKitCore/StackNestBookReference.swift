@@ -138,7 +138,7 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
               let host = url.host(percentEncoded: false),
               !host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let components = URLComponents(url: url.absoluteURL, resolvingAgainstBaseURL: false),
               components.user == nil, components.password == nil
         else { return false }
         return true
@@ -158,14 +158,17 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
         }
     }
 
+    /// 鍵と基点の資格情報を伏せた説明。 / A description with the token and any base credentials redacted.
     public var description: String {
         "StackNestBookReference(version: \(version), title: \(title), book: \(redactedBookURL.absoluteString), "
             + "token: <redacted>, expiresAt: \(expiresAt), pageCount: \(pageCount), "
             + "direction: \(direction?.rawValue ?? "nil"), startPage: \(startPage))"
     }
 
+    /// `description` と同じ（伏せ字つき）。 / Same as `description` (redacted).
     public var debugDescription: String { description }
 
+    /// `dump` などの反映。鍵は `<redacted>`。 / The mirror used by `dump` and friends; the token is `<redacted>`.
     public var customMirror: Mirror {
         Mirror(
             self,
@@ -179,11 +182,13 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
 
     /// 説明に出す基点。資格情報（`user:pw@`）は読み込みで断るが、値が別の経路で作られても文字列に残さない。
     private var redactedBookURL: URL {
-        guard var components = URLComponents(url: bookURL, resolvingAgainstBaseURL: false),
+        // 相対 URL は基点を解決してから見る（基点に資格情報があっても漏らさない）。
+        let absolute = bookURL.absoluteURL
+        guard var components = URLComponents(url: absolute, resolvingAgainstBaseURL: false),
               components.user != nil || components.password != nil
-        else { return bookURL }
+        else { return absolute }
         components.user = nil
         components.password = nil
-        return components.url ?? bookURL
+        return components.url ?? absolute
     }
 }

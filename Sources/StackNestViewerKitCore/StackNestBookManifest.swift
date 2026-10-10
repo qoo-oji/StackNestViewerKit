@@ -15,6 +15,7 @@ public struct StackNestBookManifest: Sendable, Equatable {
     /// manifest の ETag。 / The manifest's ETag.
     public let etag: String?
 
+    /// 値から作る。 / Creates a manifest from values.
     public init(pageCount: Int, direction: StackNestReadingDirection?, format: String?, etag: String?) {
         self.pageCount = pageCount
         self.direction = direction

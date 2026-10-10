@@ -194,6 +194,38 @@ struct StackNestBookReferenceTests {
         }
     }
 
+    /// 基点に資格情報がある相対 URL（絶対化すると `alice:hunter2@` が現れる）。
+    private static var credentialedRelativeURL: URL {
+        let base = URL(string: "http://alice:hunter2@127.0.0.1:51234/api/v1/libraries/L/")!
+        return URL(string: "books/7", relativeTo: base)!
+    }
+
+    @Test("作る側の init は、基点に資格情報がある相対 URL も読む側と同じく断る")
+    func producerRejectsRelativeURLWithCredentialedBase() {
+        let relative = Self.credentialedRelativeURL
+        #expect(relative.absoluteString.contains("hunter2"))
+        #expect(throws: StackNestViewerError(.invalidReference)) {
+            try StackNestBookReference(
+                version: 1, title: "t", bookURL: relative, token: "t", expiresAt: .distantFuture,
+                pageCount: 1, direction: .rightToLeft, startPage: 0)
+        }
+        expectInvalid(Self.json(["book": relative.absoluteString]))
+    }
+
+    @Test("相対 URL の基点の資格情報も、description・debugDescription・dump に出さない")
+    func relativeURLCredentialsAreRedacted() {
+        let reference = StackNestBookReference(
+            uncheckedVersion: 1, title: "t", bookURL: Self.credentialedRelativeURL, token: "secret-token-value",
+            expiresAt: Date(timeIntervalSince1970: 2_000_000_000), pageCount: 3, direction: nil, startPage: 0)
+        var dumped = ""
+        dump(reference, to: &dumped)
+        for text in [reference.description, reference.debugDescription, String(reflecting: reference), dumped] {
+            #expect(!text.contains("hunter2"))
+            #expect(!text.contains("alice"))
+            #expect(text.contains("127.0.0.1:51234/api/v1/libraries/L/books/7"))
+        }
+    }
+
     @Test("参照ファイルは Encodable にしない（鍵を JSON へ書き出す経路を型で塞ぐ）")
     func isNotEncodable() {
         #expect(!(StackNestBookReference.self is any Encodable.Type))
