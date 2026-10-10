@@ -1,0 +1,108 @@
+import CoreGraphics
+import Foundation
+import ImageIO
+import StackNestViewerKit
+import StackNestViewerKitTesting
+import Testing
+
+/// `@testable` を使わず、ビューアが書くのと同じ公開 API だけで統合の形を書く（公開の面の退行を見張る）。
+@MainActor
+@Suite("公開 API だけで書く統合の形", .serialized)
+struct PublicAPITests {
+    private func referenceFile(_ stub: StackNestStubServer, pageCount: Int, startPage: Int) throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("kit-api-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return try StackNestFixtures.writeReference(
+            StackNestFixtures.referenceJSON(bookURL: stub.bookURL, pageCount: pageCount, startPage: startPage),
+            in: folder)
+    }
+
+    @Test("README の統合例: 開く → ページ → 書き戻し → 閉じる")
+    func integrationExampleRuns() async throws {
+        let stub = StackNestStubServer(pageCount: 5)
+        let file = try referenceFile(stub, pageCount: 5, startPage: 2)
+        #expect(StackNestBookReference.isReferenceFile(file))
+        var notices: [String] = []
+        let book = try await openStackNestBook(at: file, configuration: stub.configuration()) { notices.append($0) }
+        #expect(book.pageCount == 5 && book.startPage == 2)
+        let page = try await showPage(3, of: book)
+        #expect(page.contentType == "image/png")
+        let image = CGImageSourceCreateWithData(page.data as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+        #expect(image?.width == 4 && image?.height == 6, "見立ての PNG は画像として読める")
+        closeStackNestBook(book)
+        await book.reporter.waitUntilIdle()
+        #expect(stub.requests.first?.route == .manifest)
+        #expect(stub.requests.last?.progressPage == 3)
+        #expect(notices.isEmpty)
+    }
+
+    @Test("エラーはコードで分岐し、残りは既定の文言に任せる")
+    func errorsAreHandledByCode() async throws {
+        let stub = StackNestStubServer(pageCount: 2)
+        stub.respond(.manifest, with: .status(403, headers: ["X-Library-Locked": "1"]))
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        do {
+            _ = try await session.manifest()
+            Issue.record("失敗しなかった")
+        } catch let error as StackNestViewerError {
+            let handledHere: Bool
+            switch error.code {
+            case .libraryLocked, .expired, .unauthorized: handledHere = true
+            default: handledHere = false
+            }
+            #expect(handledHere)
+            #expect(error.isPermanent)
+            #expect(error.message(language: StackNestLanguage(locale: Locale(identifier: "ja")), appName: "Example Viewer")
+                    == "StackNest でライブラリを解錠し、StackNest から開き直してください。")
+        }
+    }
+
+    @Test("同期の橋渡し（ブロックしてよいスレッドから）")
+    func blockingReaderFromAThread() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        let reader = StackNestBlockingReader(session: session)
+        let names = await withCheckedContinuation { (continuation: CheckedContinuation<[String], Never>) in
+            Thread {
+                let count = (try? reader.manifest().pageCount) ?? 0
+                _ = try? reader.page(0)
+                continuation.resume(returning: StackNestPageNaming.entryNames(pageCount: count))
+            }.start()
+        }
+        #expect(names == ["000000.jpg", "000001.jpg", "000002.jpg"])
+        #expect(stub.requests.map(\.route) == [.manifest, .page(0)])
+    }
+
+    @Test("ビューアの試験に置く自己点検（Info.plist の宣言）")
+    func selfCheckOfTheDeclaration() {
+        let info: [String: Any] = [StackNestViewerSupport.infoPlistKey: [StackNestViewerSupport.versionsKey: [1]]]
+        #expect(StackNestViewerSupport.verify(infoDictionary: info).isEmpty)
+    }
+
+    @Test("終了時の送り切り（共有の登録簿）")
+    func quitFlushThroughTheSharedRegistry() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        let reporter = StackNestProgressReporter(session: session, startPage: 0) { _ in }
+        // 登録簿は報告役を弱く持つので、最適化ビルドで早く解放されないよう検証が終わるまで握っておく。
+        // （withExtendedLifetime のクロージャは async を受け付けないため、defer で関数の終わりまで延ばす。）
+        defer { withExtendedLifetime(reporter) {} }
+        reporter.note(page: 2)
+        let registry = StackNestProgressRegistry.shared
+        #expect(registry.hasUnsentWork)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if !registry.flushAll(timeout: .seconds(5), completion: { continuation.resume() }) { continuation.resume() }
+        }
+        #expect(stub.requests.contains { $0.progressPage == 2 })
+    }
+
+    @Test("画素データが 65,535 バイトを超える PNG も画像として読め、目印が読み戻せる")
+    func largePngPageDecodes() {
+        // stored ブロックは 1 つ 65,535 バイトまでなので、それを超える大きさでブロックの分割が正しいかを見る。
+        let png = StackNestFixtures.pngPage(width: 300, height: 300, marker: 77)
+        #expect(300 * 301 > 65_535)
+        let image = CGImageSourceCreateWithData(png as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
+        #expect(image?.width == 300 && image?.height == 300)
+        #expect(StackNestFixtures.marker(of: png) == 77)
+    }
+}

@@ -27,6 +27,10 @@ let package = Package(
         .testTarget(name: "StackNestViewerKitTests",
                     dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
                     swiftSettings: [.swiftLanguageMode(.v6)]),
+        // @testable を使わず、ビューアが書くのと同じ公開 API だけで統合の形を書く。
+        .testTarget(name: "StackNestViewerKitPublicAPITests",
+                    dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
+                    swiftSettings: [.swiftLanguageMode(.v6)]),
         // 協調スレッドを飽和させる試験だけを置く（環境変数 STACKNEST_KIT_POOL_TEST=1 のときだけ走る。単独で走らせる）。
         .testTarget(name: "StackNestViewerKitPoolTests",
                     dependencies: ["StackNestViewerKit", "StackNestViewerKitTesting"],
