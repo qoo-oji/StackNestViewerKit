@@ -34,9 +34,9 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
 - gh の書き込み（Release・Issue・PR）は `Scripts/gh-guarded.sh` を通す。
   Run gh write operations (releases, issues, PRs) through `Scripts/gh-guarded.sh`.
 - CI の `release` のジョブは、ワークフローのトークンで GitHub Release を作るので `gh-guarded.sh` を通らない。
-  作者が明示の許可のもとで push した X.Y.Z のタグでだけ走る。
+  X.Y.Z のタグの push でだけ走る。そのタグは、作者の明示の許可があるときだけ push する。
   The CI `release` job creates the GitHub Release with the workflow token, so it does not go through
-  `gh-guarded.sh`. It runs only on an X.Y.Z tag that the maintainer pushes with the author's explicit permission.
+  `gh-guarded.sh`. It runs only when an X.Y.Z tag is pushed; push such a tag only with the author's explicit permission.
 
 ## リリースの手順（保守する人） / Release procedure (maintainers)
 
@@ -44,17 +44,32 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
    Move the `[Unreleased]` items under `## [X.Y.Z] - YYYY-MM-DD`.
 2. `StackNestViewerKitInfo.version` を X.Y.Z に合わせる（合っていれば不要）。
    Set `StackNestViewerKitInfo.version` to X.Y.Z, if it isn't already.
-3. コミットして main を push する（作者の許可のもとで。release.sh は main が push 済みかを確かめないが、CI を先に通すため）。
-   Commit and push main (with the author's permission; release.sh doesn't check that main is pushed, but this lets CI run first).
+3. コミットする。
+   Commit.
 4. `Scripts/release.sh X.Y.Z` を実行する。検査だけで、タグも push もしない。`core.hooksPath` が `Scripts/githooks`、
-   作業ツリーがクリーン、CHANGELOG の見出しと `StackNestViewerKitInfo.version` が X.Y.Z、X.Y.Z が公開済みの最新のタグより新しいことを求める。
+   作業ツリーがクリーン、CHANGELOG の見出しと `StackNestViewerKitInfo.version` が X.Y.Z、X.Y.Z が公開済みの最新のタグより新しいことを求め、
+   さらに shelfsmith 名義の確認、`Claude-Session:` の行・内部の印・個人識別子の検査（識別子の一覧が要る）を行う。
+   公開済みのタグのコミットが手元に無いと言われたら `git fetch --tags` を実行する。
    Run `Scripts/release.sh X.Y.Z`. It only checks; it never tags or pushes. It requires `core.hooksPath` to be
    `Scripts/githooks`, a clean working tree, the changelog heading and `StackNestViewerKitInfo.version` to be X.Y.Z,
-   and X.Y.Z to be newer than the latest published tag.
-5. 作者の許可があるときだけ、タグ X.Y.Z（`v` を付けない）を作って push する。
-   Only with the author's permission, create the tag X.Y.Z (no `v` prefix) and push it.
-6. 全ジョブが通ると、CI が Release を公開する。
-   CI publishes the Release after every job passes.
+   and X.Y.Z to be newer than the latest published tag. It also checks the shelfsmith authorship and runs the
+   `Claude-Session:` trailer, internal-marker and personal-identifier checks (the identifier list must exist).
+   If it says the published tag's commit isn't here, run `git fetch --tags`.
+5. 作者の許可のもとで main を push する。
+   With the author's permission, push main.
+6. **そのコミットの CI の全ジョブが通るまで待つ。**タグは push した瞬間に公開され、SwiftPM はそのタグの CI の結果に関わらず
+   すぐ解決できてしまう。CI が赤いコミットにタグを打ってはならない。
+   **Wait until every CI job for that commit has passed.** A tag is public the moment it is pushed, and SwiftPM can
+   resolve it right away, whatever the tag's own CI result. Never tag a commit whose CI is red.
+7. 作者の許可のもとで、**そのコミット**にタグ X.Y.Z（`v` を付けない）を打って push する。
+   With the author's permission, tag **that commit** `X.Y.Z` (no `v` prefix) and push the tag.
+8. CI がタグで全ジョブをもう一度走らせ、通れば Release を公開する。
+   CI re-runs every job on the tag and publishes the Release.
+
+GitHub Pages（Settings → Pages → Source: GitHub Actions）は、main がこのワークフローを初めて走らせる前に、作者の許可のもとで有効にする。
+有効でないと `pages` のジョブが失敗する。コードの不具合ではないが、手順 6 の「全ジョブが通る」を満たせなくなる。
+Enable GitHub Pages (Settings → Pages → Source: GitHub Actions), with the author's permission, before main first runs
+this workflow. Otherwise the `pages` job fails; that is not a code failure, but it blocks the "every job passed" gate in step 6.
 
 ## 検証 / Checks
 

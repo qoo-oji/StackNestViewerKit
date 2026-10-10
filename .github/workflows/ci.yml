@@ -178,7 +178,8 @@ jobs:
       - name: Compare with the latest tag
         shell: bash
         run: |
-          latest="$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+          # X.Y.Z だけを比べる元にする（接尾辞付き・v 付きのタグは選ばない）。タグが無いときの grep の終了コード 1 で止まらないようにする。
+          latest="$(git tag --list --sort=-v:refname | { grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true; } | head -n 1)"
           if [ -z "$latest" ]; then
             echo "::notice::No release tag yet; skipping the API breakage check."
             exit 0

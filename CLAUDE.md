@@ -14,6 +14,7 @@
 
 - push・タグ・Release・Issue・PR は、作者の明示の指示があるときだけ行う。push の URL（`remote.origin.pushurl`）は
   ふだん無効にしてあり、作者の許可のもとでその 1 回だけ有効にして push し、すぐ無効に戻す。
+- X.Y.Z のタグを push すると、CI の `release` のジョブが（`gh-guarded.sh` を通らずに）GitHub Release を作る。タグの push は Release の公開と同じ扱いにする。
 - gh の書き込みは `Scripts/gh-guarded.sh` を通す（active が `shelfsmith` でなければ実行しない）。push は pre-push の番人が
   止める（`git config core.hooksPath Scripts/githooks` をクローンごとに 1 回）。
 - 新しいクローン（別の Mac を含む）では、最初の push の前に検査語の一覧 `~/.config/stacknest/private-identifiers` が
