@@ -36,12 +36,13 @@ check_tree() {
 }
 
 check_patches() {
-    local patch hits
+    local patch hits rc=0
     patch="$(git -C "$ROOT" log -p --diff-merges=first-parent --no-color --no-ext-diff --format='commit %h' "$@")" \
         || fail "git log -p failed: $*"
     hits="$(printf '%s\n' "$patch" \
         | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}' \
-        | grep -E -f "$PATTERNS" || true)"
+        | grep -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the added lines (exit $rc)"   # 一致なし(1)と取り違えない
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "internal-markers: internal marker added by an outgoing commit (even if removed later)" >&2
@@ -50,10 +51,11 @@ check_patches() {
 }
 
 check_paths() {
-    local names hits
+    local names hits rc=0
     names="$(git -C "$ROOT" log --diff-merges=first-parent --format= --name-only -z --diff-filter=ACR "$@" | tr '\0' '\n')" \
         || fail "git log --name-only failed: $*"
-    hits="$(printf '%s\n' "$names" | grep -E -f "$PATTERNS" || true)"
+    hits="$(printf '%s\n' "$names" | grep -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the file names (exit $rc)"
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "internal-markers: internal marker in a file name added by an outgoing commit" >&2
@@ -62,9 +64,10 @@ check_paths() {
 }
 
 check_messages() {
-    local log hits
+    local log hits rc=0
     log="$(git -C "$ROOT" log --format='%B' "$@")" || fail "git log failed: $*"
-    hits="$(printf '%s\n' "$log" | grep -n -E -f "$PATTERNS" || true)"
+    hits="$(printf '%s\n' "$log" | grep -n -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the commit messages (exit $rc)"
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "internal-markers: internal marker found in commit messages" >&2
@@ -80,11 +83,17 @@ check_range() {
 
 case "${1:-}" in
 pre-push)
+    # 省略可の第 2 引数: push 先の remote の名前（pre-push フックの $1）。新しい ref では、その remote の追跡 ref に無い
+    # コミットだけを新しいものとして見る（別の remote にあるだけのコミットを見逃さない）。
+    remote="${2:-}"
     while read -r local_ref local_sha remote_ref remote_sha; do
         [ "$local_sha" = "$ZERO" ] && continue
         check_tree "$local_sha"
         if [ "$remote_sha" = "$ZERO" ]; then
-            check_range "$local_sha" --not --remotes
+            if [ -z "$remote" ]; then NOT=(--not --remotes)
+            elif git -C "$ROOT" remote | grep -Fxq -- "$remote"; then NOT=(--not "--remotes=$remote")
+            else NOT=(); fi                              # URL への push: 追跡 ref が無いので履歴をすべて見る
+            check_range "$local_sha" ${NOT[@]+"${NOT[@]}"}
         else
             check_range "$remote_sha..$local_sha"
         fi

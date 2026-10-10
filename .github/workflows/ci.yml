@@ -2,6 +2,8 @@
 # 古い Swift（macos-15 の Xcode 16.4＝Swift 6.1）と新しい Swift（macos-26・xcode-27）、x86_64（macos-15-intel）で回す。
 # macos-15 系は DEVELOPER_DIR を固定する（ランナーの既定の Xcode が変わって、古い Swift で確かめる役目が黙って消えないように）。
 name: CI
+permissions:
+  contents: read
 on:
   push:
     branches: [main, 'feature/**']

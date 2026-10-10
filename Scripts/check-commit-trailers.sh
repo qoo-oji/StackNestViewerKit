@@ -20,7 +20,7 @@ fail() { echo "commit-trailers: $*" >&2; exit 1; }
 scan() {
     awk -v label="$1" '
         /^@@commit@@ /{label=$2; next}
-        tolower($0) ~ /^[[:space:]]*claude-session:/ || tolower($0) ~ /claude[.]ai\/code\/session_/ {print label ": " $0}
+        tolower($0) ~ /^[[:space:]]*claude-session[[:space:]]*:/ || tolower($0) ~ /claude[.]ai\/code\/session_/ {print label ": " $0}
     '
 }
 
@@ -44,10 +44,16 @@ message)
     report "$(scan message < "$2")"
     ;;
 pre-push)
+    # 省略可の第 2 引数: push 先の remote の名前（pre-push フックの $1）。新しい ref では、その remote の追跡 ref に無い
+    # コミットだけを新しいものとして見る。
+    remote="${2:-}"
     while read -r local_ref local_sha remote_ref remote_sha; do
         [ "$local_sha" = "$ZERO" ] && continue          # ref の削除は検査しない
         if [ "$remote_sha" = "$ZERO" ]; then
-            check_range "$local_sha" --not --remotes     # 新しい ref: どの remote にも無いコミット
+            if [ -z "$remote" ]; then NOT=(--not --remotes)
+            elif git remote | grep -Fxq -- "$remote"; then NOT=(--not "--remotes=$remote")
+            else NOT=(); fi                              # URL への push: 追跡 ref が無いので履歴をすべて見る
+            check_range "$local_sha" ${NOT[@]+"${NOT[@]}"}
         else
             check_range "$remote_sha..$local_sha"
         fi

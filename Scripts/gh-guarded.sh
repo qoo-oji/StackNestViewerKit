@@ -24,13 +24,16 @@ fi
 #   - それ以外で既存の通常のファイルを指す引数（gist のファイルなど）
 # gh api の -F は「キー=値」の指定で、本文のファイル名ではない（値が @パスのときだけファイル）。
 if [ "$#" -eq 0 ]; then exec gh; fi
-CHECK="$(cd "$(dirname "$0")" && pwd)/check-private-identifiers.sh"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CHECK="$HERE/check-private-identifiers.sh"
 TEXT="$(mktemp -t gh-guarded-text)"
+# POSTED: 実際に公開される文面だけ（引数の値と読んだファイルの中身。ファイルのパスは含めない）。会話の URL と内部の印の検査に使う
+POSTED="$(mktemp -t gh-guarded-posted)"
 TEMPS=()
 STDIN_BODY=""
 # 一時ファイルは配列で持ち、引用付きで消す（TMPDIR に空白があっても別のファイルを消さない）。
 # bash 3.2 は set -u で空の配列の展開を嫌うので ${a[@]+...} の形にする
-cleanup() { rm -f "$TEXT"; local f; for f in ${TEMPS[@]+"${TEMPS[@]}"}; do rm -f "$f"; done; return 0; }
+cleanup() { rm -f "$TEXT" "$POSTED"; local f; for f in ${TEMPS[@]+"${TEMPS[@]}"}; do rm -f "$f"; done; return 0; }
 trap cleanup EXIT
 printf '%s\n' "$@" > "$TEXT"
 SUB="$1"
@@ -56,6 +59,7 @@ resolve_input() {
     refuse "body input not found: $src"
   fi
   cat "$INPUT" >> "$TEXT"; echo >> "$TEXT"       # 本文どうしをつなげない（^ $ の検査語のため）
+  cat "$INPUT" >> "$POSTED"; echo >> "$POSTED"
 }
 
 # gh api の -F / --field の「キー=値」。gh と同じく、最初の "=" の直後が "@" のときだけ値をファイルとして
@@ -66,6 +70,7 @@ expand_field() {
   case "$1" in *=*) ;; *) return 0 ;; esac
   case "$value" in
     @*) resolve_input "${value#@}"; FIELD="$key=@$INPUT" ;;
+    *) printf '%s\n' "$1" >> "$POSTED" ;;
   esac
 }
 
@@ -89,13 +94,17 @@ for a in "$@"; do
         --field=*)                                 # --field=key=value
           expand_field "${a#--field=}"; a="--field=$FIELD" ;;
         *)
-          [ -f "$a" ] && { cat "$a" >> "$TEXT"; echo >> "$TEXT"; } ;;    # gist のファイルなど（-f/--raw-field の値はそのまま）
+          if [ -f "$a" ]; then cat "$a" >> "$TEXT"; echo >> "$TEXT"; cat "$a" >> "$POSTED"; echo >> "$POSTED"
+          else printf '%s\n' "$a" >> "$POSTED"; fi ;;    # gist のファイルなど（-f/--raw-field の値はそのまま）
       esac ;;
   esac
   ARGS+=("$a")
 done
 [ -z "$expect" ] || refuse "missing value for the last option"
 "$CHECK" text "$TEXT" || refuse "refusing to post: gh $1 ${2:-}"
+# 会話の URL・Claude-Session: の行・内部の印（Scripts/internal-markers.txt）も公開の文面に出さない
+"$HERE/check-commit-trailers.sh" message "$POSTED" || refuse "refusing to post (session line or URL): gh $1 ${2:-}"
+"$HERE/check-internal-markers.sh" text "$POSTED" || refuse "refusing to post (internal marker): gh $1 ${2:-}"
 # exec で置き換えると後片付け（trap）が走らないので、gh を呼んでから終了コードを返す
 rc=0
 gh "${ARGS[@]}" || rc=$?

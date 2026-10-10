@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # HTTPS の remote への push は gh の active アカウントの認証で通るため、期待のアカウント以外のときは止める。
 # 有効化: git config core.hooksPath Scripts/githooks（クローンごとに 1 回）
+REMOTE="${1:-}"   # push 先の remote の名前（URL への push では URL）
 EXPECTED="${STACKNEST_GH_LOGIN:-shelfsmith}"
 unset GITHUB_TOKEN GH_TOKEN
 ACTUAL="$(gh api user --jq .login 2>/dev/null || true)"
@@ -13,8 +14,19 @@ ROOT="$(git rev-parse --show-toplevel)"
 REFS="$(cat)"
 [ -n "$REFS" ] || exit 0
 # 公開のコミットに Claude-Session: の行を残さない（このリポジトリの決まり。CONTRIBUTING.md）。
-printf '%s\n' "$REFS" | "$ROOT/Scripts/check-commit-trailers.sh" pre-push || exit 1
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-commit-trailers.sh" pre-push "$REMOTE" || exit 1
 # 内部の印（内部の作業の番号・計画の文書の名前など。語彙は Scripts/internal-markers.txt）を push しない。
-printf '%s\n' "$REFS" | "$ROOT/Scripts/check-internal-markers.sh" pre-push || exit 1
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-internal-markers.sh" pre-push "$REMOTE" || exit 1
+# 注釈付きタグのメッセージ（コミットの検査では見えない）も、3 つの規則で検査する。
+TAGTEXT="$(mktemp -t pre-push-tag)"
+trap 'rm -f "$TAGTEXT"' EXIT
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_ref" in refs/tags/*) ;; *) continue ;; esac
+  [ "$(git cat-file -t "$local_sha" 2>/dev/null || true)" = "tag" ] || continue
+  git cat-file tag "$local_sha" > "$TAGTEXT" || { echo "pre-push: cannot read the tag object of $local_ref. Push refused." >&2; exit 1; }
+  "$ROOT/Scripts/check-commit-trailers.sh" message "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
+  "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
+  "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
+done <<< "$REFS"
 # 個人識別子（実名など）を push しない。push する各コミットのファイル全体と、新しいコミットのメッセージ・作成者を検査する。
-printf '%s\n' "$REFS" | "$ROOT/Scripts/check-private-identifiers.sh" pre-push
+printf '%s\n' "$REFS" | "$ROOT/Scripts/check-private-identifiers.sh" pre-push "$REMOTE"

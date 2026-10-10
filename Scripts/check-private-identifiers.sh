@@ -44,7 +44,7 @@ check_tree() {
 # 消した行は見ない — 見ると、識別子を消すコミットそのものが止まる）。マージのコミットは第 1 親との
 # 差分として見る（衝突の解消の中で入った行も拾う）
 check_patches() {
-    local patch hits
+    local patch hits rc=0
     patch="$(git log -p --diff-merges=first-parent --no-color --no-ext-diff --format='commit %h' "$@")" \
         || fail "git log -p failed: $*"
     # 足された行だけを、行頭の "+" を外して照合する（^ や $ で固定した検査語も当たるように）。
@@ -52,7 +52,8 @@ check_patches() {
     # "@@" の区切りの中だけを見る
     hits="$(printf '%s\n' "$patch" \
         | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}' \
-        | grep -i -E -f "$PATTERNS" || true)"
+        | grep -i -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the added lines (exit $rc)"   # 一致なし(1)と取り違えない
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "private-identifiers: personal identifier added by an outgoing commit (even if removed later)" >&2
@@ -63,10 +64,11 @@ check_patches() {
 # 範囲内の各コミットで足した・名前を変えた・写したファイルの名前（中身の無いファイルやバイナリは
 # パッチの見出しに名前が出ないので、名前の一覧として別に見る。-z で非 ASCII の名前の引用を避ける）
 check_paths() {
-    local names hits
+    local names hits rc=0
     names="$(git log --diff-merges=first-parent --format= --name-only -z --diff-filter=ACR "$@" | tr '\0' '\n')" \
         || fail "git log --name-only failed: $*"
-    hits="$(printf '%s\n' "$names" | grep -i -E -f "$PATTERNS" || true)"
+    hits="$(printf '%s\n' "$names" | grep -i -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the file names (exit $rc)"
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "private-identifiers: personal identifier in a file name added by an outgoing commit" >&2
@@ -76,10 +78,11 @@ check_paths() {
 
 # 範囲内の各コミットのメッセージと作成者・コミッタ
 check_commits() {
-    local log hits
+    local log hits rc=0
     # 名前・メール・本文の各行をそのまま 1 行ずつ照合する（^ や $ で固定した検査語も当たるように）
     log="$(git log --format='%an%n%ae%n%cn%n%ce%n%B' "$@")" || fail "git log failed: $*"
-    hits="$(printf '%s\n' "$log" | grep -n -i -E -f "$PATTERNS" || true)"
+    hits="$(printf '%s\n' "$log" | grep -n -i -E -f "$PATTERNS")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed on the commit messages (exit $rc)"
     if [ -n "$hits" ]; then
         echo "$hits" >&2
         echo "private-identifiers: personal identifier found in commit messages or authors" >&2
@@ -89,11 +92,16 @@ check_commits() {
 
 case "${1:-}" in
 pre-push)
+    # 省略可の第 2 引数: push 先の remote の名前（pre-push フックの $1）。新しい ref では、その remote の追跡 ref に無い
+    # コミットだけを新しいものとして見る。
+    remote="${2:-}"
     while read -r local_ref local_sha remote_ref remote_sha; do
         [ "$local_sha" = "$ZERO" ] && continue          # ref の削除は検査しない
         check_tree "$local_sha"
         if [ "$remote_sha" = "$ZERO" ]; then
-            set -- "$local_sha" --not --remotes          # 新しい ref: どの remote にも無いコミット
+            if [ -z "$remote" ]; then set -- "$local_sha" --not --remotes
+            elif git remote | grep -Fxq -- "$remote"; then set -- "$local_sha" --not "--remotes=$remote"
+            else set -- "$local_sha"; fi                  # URL への push: 追跡 ref が無いので履歴をすべて見る
         else
             set -- "$remote_sha..$local_sha"
         fi
