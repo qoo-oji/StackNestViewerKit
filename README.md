@@ -209,7 +209,7 @@ swift test
 STACKNEST_KIT_POOL_TEST=1 swift test --filter StackNestViewerKitPoolTests   # 協調スレッドを飽和させる試験（単独で）
 swift test --package-path Samples                                            # 偽の StackNest を相手にした端から端
 python3 -m unittest discover -s Tests/Scripts -p 'test_*.py'                  # スクリプトの試験
-python3 Scripts/build-documentation.py --output-dir .build/documentation/site --derived-data .build/documentation/DerivedData
+python3 Scripts/build-documentation.py --output-dir "$(mktemp -d)/site" --derived-data .build/documentation/DerivedData
 ```
 
 協調スレッドを飽和させる試験は、同じプロセスのほかの試験を止めるので、ふだんの `swift test` では skip し、単独で走らせる。

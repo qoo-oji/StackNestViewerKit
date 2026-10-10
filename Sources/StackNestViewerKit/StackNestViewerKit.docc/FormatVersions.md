@@ -10,7 +10,7 @@ The kit's version (semver) and the reference file's version (an integer) are sep
 宣言し、StackNest は宣言と自分の書ける版の共通の最大で書く。部品は実行時に交渉せず、読めない版は
 `unsupportedVersion`。
 
-Kit 0.1.x reads and writes version 1. The viewer declares the versions it reads, and StackNest writes the highest
+Kit 0.1.x reads and writes version 1. The viewer declares the versions it reads in `Info.plist`, and StackNest writes the highest
 version both support. The kit doesn't negotiate at run time; unreadable versions fail with `unsupportedVersion`.
 
 ```swift

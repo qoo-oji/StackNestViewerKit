@@ -6,12 +6,12 @@ How the kit handles the token and where it connects.
 
 ## 鍵 / The Token
 
-参照ファイルの `token` はその本だけに使える 30 日の秘密。部品はメモリの中だけで使い、``StackNestBookReference`` は
+参照ファイルの `token` はその本だけに使える、最長 30 日の秘密（中継されたリモートの本では、30 日とリモートの鍵の期限の早い方）。部品はメモリの中だけで使い、``StackNestBookReference`` は
 `Codable` ではなく、`description`・`dump` では `<redacted>` になる。ホストも鍵を保存しない（履歴・コレクション・
 書き出し・ログに入れない）。本の同一性には参照ファイルのパスを使う（`book` の URL は開くたびに変わることがある）。
 
-The token is a 30-day secret for one book. The kit keeps it in memory only; ``StackNestBookReference`` isn't
-`Codable` and redacts the token in descriptions and dumps. Hosts shouldn't store it either. Use the reference file's
+The token is a secret for one book, valid for at most 30 days (for relayed remote books, until the earlier of 30 days and the remote key's expiry). The kit keeps it in memory only; ``StackNestBookReference`` isn't
+`Codable` and redacts the token in descriptions and dumps. Hosts shouldn't store it either (not in history, collections, exports or logs). Use the reference file's
 path to identify the book (the `book` URL can change each time the book is opened).
 
 ## つなぐ宛先 / Hosts
@@ -20,7 +20,7 @@ path to identify the book (the `book` URL can change each time the book is opene
 （`127.0.0.1` と `::1` の字面だけ）。外れた `book` には要求を出さずに `hostNotAllowed` を返す。広げるときは明示する。
 
 The default ``StackNestBookSession/Configuration-swift.struct/allowedHosts`` is ``StackNestHostPolicy/loopbackOnly``
-(only the literal addresses `127.0.0.1` and `::1`). Other hosts fail with `hostNotAllowed` without a request.
+(only the literal addresses `127.0.0.1` and `::1`). Other hosts fail with `hostNotAllowed` without a request; widening the list must be explicit.
 
 ```swift
 import StackNestViewerKit

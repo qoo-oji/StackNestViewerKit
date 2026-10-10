@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""DocC の文書を作り、記事と README の Swift の例をすべて型検査し、静的に公開するサイトを書き出す。
+"""DocC の文書を作り、記事の Swift の例すべてと README の統合の例を型検査し、静的に公開するサイトを書き出す。
+README の導入の ```swift``` の塊（`.package` の 1 行）は型検査しない。
 
-Builds the DocC documentation, typechecks every Swift example in the articles and the README, and writes a site for
-static hosting.
+Builds the DocC documentation, typechecks every Swift example in the articles plus the README integration example
+(the README's `.package` snippet is not checked), and writes a site for static hosting.
 """
 
 import argparse
@@ -15,10 +16,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "Tests/StackNestViewerKitPublicAPITests/IntegrationExample.swift"
-EXAMPLE_COPIES = [ROOT / f"Samples/Sources/{target}/IntegrationExample.swift"
-                  for target in ("HostModeMainActor", "HostModeSwift5", "HostModeSwift6")]
+EXAMPLE_COPIES = sorted((ROOT / "Samples/Sources").glob("HostMode*/IntegrationExample.swift"))
+EXPECTED_COPIES = 3  # HostModeMainActor, HostModeSwift5, HostModeSwift6
 README_BLOCK = re.compile(r"<!-- integration-example:begin -->\n```swift\n(.*?)```\n<!-- integration-example:end -->", re.S)
-SWIFT_BLOCK = re.compile(r"^```swift\s*\n(.*?)^```\s*$", re.M | re.S)
+SWIFT_BLOCK = re.compile(r"^```swift[ \t]*\n(.*?)^```[ \t]*$", re.M | re.S)
 MODULES = [("StackNestViewerKit", "kit"), ("StackNestViewerKitCore", "core")]
 
 
@@ -35,6 +36,8 @@ def check_integration_example():
     started = SWIFT_BLOCK.search((ROOT / "Sources/StackNestViewerKit/StackNestViewerKit.docc/GettingStarted.md").read_text())
     if started is None or started.group(1) != canonical:
         raise RuntimeError("GettingStarted の統合例が IntegrationExample.swift と違う / GettingStarted example differs")
+    if len(EXAMPLE_COPIES) != EXPECTED_COPIES:
+        raise RuntimeError(f"HostMode の例が {len(EXAMPLE_COPIES)} 個 (期待 {EXPECTED_COPIES}) / HostMode copies found")
     for copy in EXAMPLE_COPIES:
         if copy.read_text() != canonical:
             raise RuntimeError(f"{copy.relative_to(ROOT)} が IntegrationExample.swift と違う / differs")

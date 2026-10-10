@@ -12,7 +12,7 @@ Pages, prefetching, smaller images, the cache and decoding slots.
 1 件にまとまり、直近のページ（既定 8 枚・合計 64 MiB。1 枚が合計の半分を超えるページは持たない）はメモリに持つ。
 
 ``StackNestBookSession/page(_:maxWidth:priority:)`` returns the bytes and the `Content-Type`. Pages may be JPEG,
-PNG or WebP. For relayed remote books, when `maxWidth` is omitted (or 1600), pages wider than 1600 pixels arrive
+PNG or WebP; check the format by `contentType` or the bytes. For relayed remote books, when `maxWidth` is omitted (or 1600), pages wider than 1600 pixels arrive
 scaled so the longer side is at most 1600 pixels, as JPEG. Concurrent requests for the same page share one request,
 and recent pages (8 pages and 64 MiB in total by default; a page larger than half of that isn't kept) stay in memory.
 
@@ -53,4 +53,4 @@ func pageDidChange(to page: Int, session: StackNestBookSession, pageCount: Int) 
 先読みの取り中のページに表示の要求が乗ったら、枠の列でも表示の側へ並べ直す（部品が上げるのは網の優先度だけ）。
 
 The kit doesn't know about the host's decoding slots. Take a slot **after** the bytes arrive, and when a display
-request joins a page being prefetched, move it to the display queue for slots too.
+request joins a page being prefetched, move it to the display queue for slots too (the kit only raises the network priority).

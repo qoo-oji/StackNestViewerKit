@@ -12,7 +12,7 @@ Debug では `assertionFailure` で知らせる（完全な検出ではない）
 協調スレッドがふさがっていても進む。
 
 ``StackNestBlockingReader`` blocks the calling thread until the response arrives. Call it only from a thread the
-host lets block. Calls from the main thread or inside a `Task` trigger `assertionFailure` in debug builds (the
+host lets block (a thread or queue the host set up for I/O). Calls from the main thread or inside a `Task` trigger `assertionFailure` in debug builds (the
 detection isn't exhaustive). The bridge never creates a `Task` or awaits, so it keeps working when the cooperative
 pool is saturated.
 

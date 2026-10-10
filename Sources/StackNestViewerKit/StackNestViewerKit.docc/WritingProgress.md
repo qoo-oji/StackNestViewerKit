@@ -7,14 +7,14 @@
 ## まとめて送る / Batching
 
 `note(page:)` のたびに 3 秒待ち直し、最初に止まってから 10 秒を超えては待たない。飛ぶ送信は 1 件で、待つのは最新の
-1 件。失敗したページはすぐには送り直さず、次の `note(page:)`・`flush()`・`close()` で送る。期限切れ・認証失敗・本が
+1 件。失敗したページはすぐには送り直さず、次の `note(page:)`・`flush()`・`close()` を待つ（その間に新しいページが来れば、新しい方を送る）。期限切れ・認証失敗・本が
 無い・ライブラリのロック・つないでよくないホストの後は、その本については送らない。同じ種類の知らせは続けて 1 度だけ
 （送れたら記憶を消す）。閉じるときは ``StackNestProgressReporter/close()``。`close()` の後（と、終了時の
 ``StackNestProgressRegistry/flushAll(timeout:completion:)`` が報告者を閉じた後）の `note(page:)` は無視される。
 
 Each `note(page:)` restarts a 3-second wait, never longer than 10 seconds from the first change. One send is in
-flight and only the newest page waits. A failed page isn't retried on its own; it goes out with the next
-`note(page:)`, `flush()` or `close()`. After a permanent failure (expired, unauthorized, book not found, library
+flight and only the newest page waits. A failed page isn't retried on its own; it waits for the next
+`note(page:)`, `flush()` or `close()`, and a newer page noted in the meantime replaces it (after the batching wait). After a permanent failure (expired, unauthorized, book not found, library
 locked, host not allowed) nothing more is sent for that book. The same kind of failure is reported once in a row
 (a successful send resets that). Call ``StackNestProgressReporter/close()`` when the book closes; `note(page:)`
 after `close()` (or after the quit-time ``StackNestProgressRegistry/flushAll(timeout:completion:)`` has closed the

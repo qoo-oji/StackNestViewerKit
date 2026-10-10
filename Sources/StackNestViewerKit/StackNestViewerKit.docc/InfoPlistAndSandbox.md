@@ -8,7 +8,7 @@ The support declaration, the reference file type, plain HTTP to 127.0.0.1 and th
 
 StackNest は、ビューアの `Info.plist` にこの宣言があるときだけ参照ファイルを渡す。読める版を整数で並べる。
 
-StackNest hands reference files only to viewers that declare support. List the versions the viewer reads.
+StackNest hands reference files only to viewers that declare support. List the versions the viewer reads, as integers.
 
 ```xml
 <key>StackNestViewerSupport</key>
@@ -37,10 +37,10 @@ func declarationProblems() -> [StackNestViewerSupport.Issue] {
 
 `UTImportedTypeDeclarations` で `app.shelfsmith.stacknest.book-reference`（`public.json` に準拠・拡張子
 `stacknestbook`）を取り込み、`CFBundleDocumentTypes` で書類として受け付ける（`application(_:open:)` に届く）。
-StackNest は `open -a` でアプリを名指しするので、順位は `Alternate` で足りる。
+StackNest は開くアプリを名指しして渡す（`NSWorkspace`）ので、順位は `Alternate` で足りる。
 
 Import `app.shelfsmith.stacknest.book-reference` (conforms to `public.json`, extension `stacknestbook`) and accept
-it as a document type. StackNest names the app when it opens the file, so the `Alternate` rank is enough.
+it as a document type (it arrives in `application(_:open:)`). StackNest names the app when it opens the file, so the `Alternate` rank is enough.
 
 ```xml
 <key>UTImportedTypeDeclarations</key>
@@ -81,4 +81,4 @@ Xcode のビルド設定では `ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES`（エ
 `com.apple.security.network.client`）。部品は既定で `127.0.0.1` と `::1` にしかつながない（<doc:Security>）。
 
 In Xcode build settings, set `ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES` (the
-`com.apple.security.network.client` entitlement). The kit connects only to `127.0.0.1` and `::1` by default.
+`com.apple.security.network.client` entitlement). The kit connects only to `127.0.0.1` and `::1` by default (see <doc:Security>).
