@@ -21,7 +21,7 @@
 
 ```sh
 git config core.hooksPath Scripts/githooks
-test -s ~/.config/stacknest/private-identifiers && echo "identifier list present"
+grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && echo "identifier list present"
 ```
 
 - commit-msg は `Claude-Session:` の行を止める。pre-push は、gh の active アカウント（既定 `shelfsmith`）・`Claude-Session:` の行・

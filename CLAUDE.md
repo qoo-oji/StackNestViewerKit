@@ -17,7 +17,7 @@
 - gh の書き込みは `Scripts/gh-guarded.sh` を通す（active が `shelfsmith` でなければ実行しない）。push は pre-push の番人が
   止める（`git config core.hooksPath Scripts/githooks` をクローンごとに 1 回）。
 - 新しいクローン（別の Mac を含む）では、最初の push の前に検査語の一覧 `~/.config/stacknest/private-identifiers` が
-  あることを確かめる（`test -s`。中身は表示しない）。
+  あることを確かめる（コメントだけの一覧は空と同じ扱いなので、`grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q .` で確かめる。中身は表示しない）。
 
 ## 匿名性
 
