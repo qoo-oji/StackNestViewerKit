@@ -17,16 +17,26 @@ REFS="$(cat)"
 printf '%s\n' "$REFS" | "$ROOT/Scripts/check-commit-trailers.sh" pre-push "$REMOTE" || exit 1
 # 内部の印（内部の作業の番号・計画の文書の名前など。語彙は Scripts/internal-markers.txt）を push しない。
 printf '%s\n' "$REFS" | "$ROOT/Scripts/check-internal-markers.sh" pre-push "$REMOTE" || exit 1
-# 注釈付きタグのメッセージ（コミットの検査では見えない）も、3 つの規則で検査する。
+# push する ref の名前（ブランチ・タグ。軽量タグも）と、注釈付きタグのメッセージ（コミットの検査では見えない）を、
+# 内部の印・個人識別子・Claude-Session: の規則で検査する。タグは ref の名前ではなく、送るオブジェクトの種類で決める
+# （`git push <remote> <タグの SHA>:refs/tags/x` も対象）。入れ子のタグは中まで順にたどる。ref の削除は検査しない。
 TAGTEXT="$(mktemp -t pre-push-tag)"
 trap 'rm -f "$TAGTEXT"' EXIT
+ZERO="0000000000000000000000000000000000000000"
 while read -r local_ref local_sha remote_ref remote_sha; do
-  case "$local_ref" in refs/tags/*) ;; *) continue ;; esac
-  [ "$(git cat-file -t "$local_sha" 2>/dev/null || true)" = "tag" ] || continue
-  git cat-file tag "$local_sha" > "$TAGTEXT" || { echo "pre-push: cannot read the tag object of $local_ref. Push refused." >&2; exit 1; }
-  "$ROOT/Scripts/check-commit-trailers.sh" message "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
-  "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
-  "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: tag $local_ref refused." >&2; exit 1; }
+  [ "$local_sha" = "$ZERO" ] && continue
+  printf '%s\n' "$remote_ref" > "$TAGTEXT"
+  "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
+  "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
+  obj="$local_sha"
+  while [ "$(git cat-file -t "$obj" 2>/dev/null || true)" = "tag" ]; do
+    git cat-file tag "$obj" > "$TAGTEXT" || { echo "pre-push: cannot read the tag object of $remote_ref. Push refused." >&2; exit 1; }
+    "$ROOT/Scripts/check-commit-trailers.sh" message "$TAGTEXT" || { echo "pre-push: tag $remote_ref refused." >&2; exit 1; }
+    "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: tag $remote_ref refused." >&2; exit 1; }
+    "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: tag $remote_ref refused." >&2; exit 1; }
+    obj="$(sed -n 's/^object //p;q' "$TAGTEXT")"
+    [ -n "$obj" ] || { echo "pre-push: cannot follow the tag object of $remote_ref. Push refused." >&2; exit 1; }
+  done
 done <<< "$REFS"
 # 個人識別子（実名など）を push しない。push する各コミットのファイル全体と、新しいコミットのメッセージ・作成者を検査する。
 printf '%s\n' "$REFS" | "$ROOT/Scripts/check-private-identifiers.sh" pre-push "$REMOTE"

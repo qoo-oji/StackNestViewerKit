@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 公開の場（この repo への push・Issue・PR・Release）に個人識別子を出さないための検査。
-# StackNest のリポジトリ（shelfsmith/stacknest）の同名のスクリプトの写し。検査語の一覧も同じものを使う。
+# StackNest のリポジトリ（shelfsmith/stacknest）の同名のスクリプトから始めたが、いまは違う（grep の失敗で止まる・新しい ref は
+# push 先の remote だけを見る）。検査語の一覧は同じものを使う。
 #
 # 検査する語の一覧はリポジトリの外に置く（中身そのものが識別子なので、ここには書かない）:
 #   ${STACKNEST_PRIVATE_IDENTIFIERS_FILE:-$HOME/.config/stacknest/private-identifiers}
