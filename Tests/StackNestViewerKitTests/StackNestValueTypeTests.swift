@@ -48,4 +48,20 @@ struct StackNestValueTypeTests {
         #expect(StackNestPageNaming.entryNames(pageCount: 3) == ["000000.jpg", "000001.jpg", "000002.jpg"])
         #expect(StackNestPageNaming.entryNames(pageCount: -1).isEmpty)
     }
+
+    @Test("URL 側のホストも大文字小文字を区別しない")
+    func hostMatchingIsCaseInsensitive() {
+        let policy = StackNestHostPolicy.loopback(plus: ["books.example.com"])
+        #expect(policy.allows(URL(string: "http://BOOKS.Example.COM/x")!))
+        #expect(!policy.allows(URL(string: "http://OTHER.example.com/x")!))
+    }
+
+    @Test("巨大な Duration でも秒数への変換は落ちない")
+    func hugeDurationsDoNotTrap() {
+        #expect(Duration.seconds(Int64.max).timeInterval == Double(Int64.max))
+        #expect((Duration.seconds(Int64.max) + .seconds(60)).timeInterval >= Double(Int64.max))
+        #expect(Duration.seconds(-Int64.max).timeInterval < 0)
+        #expect(Duration.milliseconds(1500).timeInterval == 1.5)
+        #expect(Duration.zero.timeInterval == 0)
+    }
 }
