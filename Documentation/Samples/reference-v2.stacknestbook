@@ -1,7 +1,7 @@
 {
   "book" : "http://127.0.0.1:51234/api/v1/libraries/00000000-0000-4000-8000-000000000001/books/42",
   "direction" : "rtl",
-  "expiresAt" : "2027-01-15T08:00:00Z",
+  "expiresAt" : "2099-12-31T00:00:00Z",
   "format" : "stacknest-book-reference",
   "pageCount" : 180,
   "startPage" : 41,

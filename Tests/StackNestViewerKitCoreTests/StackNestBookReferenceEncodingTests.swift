@@ -12,7 +12,7 @@ struct StackNestBookReferenceEncodingTests {
     static func goldenReference() throws -> StackNestBookReference {
         try StackNestBookReference(
             version: 1, title: "Example Book", bookURL: goldenBook, token: "example-token-not-a-secret",
-            expiresAt: try Date("2027-01-15T08:00:00Z", strategy: .iso8601), pageCount: 180,
+            expiresAt: try Date("2099-12-31T00:00:00Z", strategy: .iso8601), pageCount: 180,
             direction: .rightToLeft, startPage: 41)
     }
 
@@ -28,7 +28,7 @@ struct StackNestBookReferenceEncodingTests {
         let legacy = try LegacyReferenceReader.parse(try DocumentationSamples.data("reference-v1.stacknestbook"))
         #expect(legacy == LegacyReferenceReader.Reference(
             version: 1, title: "Example Book", bookURL: Self.goldenBook, token: "example-token-not-a-secret",
-            expiresAt: try Date("2027-01-15T08:00:00Z", strategy: .iso8601), pageCount: 180, direction: "rtl",
+            expiresAt: try Date("2099-12-31T00:00:00Z", strategy: .iso8601), pageCount: 180, direction: "rtl",
             startPage: 41))
     }
 
