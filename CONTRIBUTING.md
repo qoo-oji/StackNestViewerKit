@@ -33,6 +33,28 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
   list lives outside the repository; without it, pushes stop. Check it exists before the first push from a new clone.
 - gh の書き込み（Release・Issue・PR）は `Scripts/gh-guarded.sh` を通す。
   Run gh write operations (releases, issues, PRs) through `Scripts/gh-guarded.sh`.
+- CI の `release` のジョブは、ワークフローのトークンで GitHub Release を作るので `gh-guarded.sh` を通らない。
+  作者が明示の許可のもとで push した X.Y.Z のタグでだけ走る。
+  The CI `release` job creates the GitHub Release with the workflow token, so it does not go through
+  `gh-guarded.sh`. It runs only on an X.Y.Z tag that the maintainer pushes with the author's explicit permission.
+
+## リリースの手順（保守する人） / Release procedure (maintainers)
+
+1. `CHANGELOG.md` の `[Unreleased]` の項目を `## [X.Y.Z] - YYYY-MM-DD` の下へ移す。
+   Move the `[Unreleased]` items under `## [X.Y.Z] - YYYY-MM-DD`.
+2. `StackNestViewerKitInfo.version` を X.Y.Z に合わせる（合っていれば不要）。
+   Set `StackNestViewerKitInfo.version` to X.Y.Z, if it isn't already.
+3. コミットして main を push する（作者の許可のもとで。release.sh は main が push 済みかを確かめないが、CI を先に通すため）。
+   Commit and push main (with the author's permission; release.sh doesn't check that main is pushed, but this lets CI run first).
+4. `Scripts/release.sh X.Y.Z` を実行する。検査だけで、タグも push もしない。`core.hooksPath` が `Scripts/githooks`、
+   作業ツリーがクリーン、CHANGELOG の見出しと `StackNestViewerKitInfo.version` が X.Y.Z、X.Y.Z が公開済みの最新のタグより新しいことを求める。
+   Run `Scripts/release.sh X.Y.Z`. It only checks; it never tags or pushes. It requires `core.hooksPath` to be
+   `Scripts/githooks`, a clean working tree, the changelog heading and `StackNestViewerKitInfo.version` to be X.Y.Z,
+   and X.Y.Z to be newer than the latest published tag.
+5. 作者の許可があるときだけ、タグ X.Y.Z（`v` を付けない）を作って push する。
+   Only with the author's permission, create the tag X.Y.Z (no `v` prefix) and push it.
+6. 全ジョブが通ると、CI が Release を公開する。
+   CI publishes the Release after every job passes.
 
 ## 検証 / Checks
 
