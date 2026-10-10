@@ -13,10 +13,15 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "StackNestViewerKitCore", targets: ["StackNestViewerKitCore"]),
+        .library(name: "StackNestViewerKit", targets: ["StackNestViewerKit"]),
     ],
     targets: [
         .target(name: "StackNestViewerKitCore", swiftSettings: [.swiftLanguageMode(.v6)]),
+        .target(name: "StackNestViewerKit", dependencies: ["StackNestViewerKitCore"],
+                swiftSettings: [.swiftLanguageMode(.v6)]),
         .testTarget(name: "StackNestViewerKitCoreTests", dependencies: ["StackNestViewerKitCore"],
+                    swiftSettings: [.swiftLanguageMode(.v6)]),
+        .testTarget(name: "StackNestViewerKitTests", dependencies: ["StackNestViewerKit"],
                     swiftSettings: [.swiftLanguageMode(.v6)]),
     ]
 )
