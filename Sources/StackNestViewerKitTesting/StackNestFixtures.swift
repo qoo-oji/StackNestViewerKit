@@ -32,6 +32,14 @@ public enum StackNestFixtures {
     ///
     /// A grayscale PNG whose pixels all have the brightness `marker`, so `marker(of:)` can tell which page it is.
     /// The image data isn't compressed.
+    ///
+    /// `marker` は 0…255 の範囲に収まる値で、256 以上は 256 で一巡する（300 は 44 として読める）。ページ数が 255 を
+    /// 超える見立てでは、255 番のページと表紙（255）、256 番と 0 番は見分けられない。大きな画像（例: 1600×2400）は、
+    /// debug ビルドでは数秒から十数秒かかる。
+    ///
+    /// The marker is meant to be 0...255 and wraps modulo 256 (300 reads back as 44), so with more than 255
+    /// pages page 255 can't be told from the cover (255) and page 256 not from page 0. Large images (such as
+    /// 1600×2400) take several seconds in debug builds.
     public static func pngPage(width: Int = 4, height: Int = 6, marker: Int = 0) -> Data {
         let rows = (0..<height).map { _ -> [UInt8] in
             [0] + (0..<width).map { _ in UInt8(truncatingIfNeeded: marker) }
@@ -88,7 +96,7 @@ public enum StackNestFixtures {
     /// `pngPage(marker:)` の 1 画素目の明るさを読む。 / Reads the brightness `pngPage(marker:)` wrote.
     public static func marker(of png: Data) -> Int? {
         // IDAT の本文: zlib の見出し 2 バイト・stored ブロックの見出し 5 バイト・行の filter 1 バイトの次が 1 画素目。
-        guard let start = png.range(of: Data("IDAT".utf8))?.upperBound, png.count > start + 8 else { return nil }
+        guard let start = png.range(of: Data("IDAT".utf8))?.upperBound, png.endIndex > start + 8 else { return nil }
         return Int(png[start + 8])
     }
 }

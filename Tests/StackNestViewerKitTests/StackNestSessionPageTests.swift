@@ -101,6 +101,8 @@ struct StackNestSessionPageTests {
         gate.open()
         #expect(StackNestFixtures.marker(of: try await second.value.data) == 0)
         #expect(stub.requestCount(.page(0)) == 1)
+        // URLSession's clean-up stop arrives shortly after delivery; it must not be counted as a cancellation.
+        try await Task.sleep(for: .milliseconds(200))
         #expect(stub.stoppedRequestCount == 0)
     }
 
@@ -257,6 +259,8 @@ struct StackNestSessionPageTests {
         await #expect(throws: CancellationError.self) { try await session.manifest() }
         await #expect(throws: CancellationError.self) { try await session.manifest(refresh: true) }
         await #expect(throws: CancellationError.self) { try await session.cover() }
+        await #expect(throws: CancellationError.self) { try await session.page(-1) }
+        await #expect(throws: CancellationError.self) { try await session.page(3) }
         #expect(stub.requests.count == before)
         try await session.postProgress(page: 2)
         #expect(stub.requests.last?.progressPage == 2)

@@ -17,6 +17,8 @@ enum RequestKey: Hashable, Sendable {
 struct FetchedResponse: Sendable {
     let data: Data
     let contentType: String?
+    /// 応答を返した件の通し番号（`finish` が付ける）。manifest の新旧の順を決める。
+    var serial: UInt64 = 0
 }
 
 /// `pages/{n}` の 404。顔（async・同期）が manifest を読み直して `.pageOutOfRange` などに振り分ける。外へは出さない。
@@ -111,6 +113,8 @@ struct EngineState {
     /// manifest を 1 度でも読んだか（範囲外の確かめ直しはセッションごとに 1 度だけ）。
     var hasConfirmedPageCount = false
     var manifest: StackNestBookManifest?
+    /// 最後に反映した manifest の応答の件の通し番号（古い応答で新しい manifest を上書きしない）。
+    var manifestSerial: UInt64 = 0
     var isClosed = false
     var permanentFailure: StackNestViewerError?
     /// まだ出していない先読み（指示の順）。

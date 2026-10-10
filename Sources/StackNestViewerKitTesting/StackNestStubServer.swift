@@ -10,12 +10,22 @@ import StackNestViewerKit
 /// A `URLProtocol` stand-in for StackNest's book API — one per test. Requests are routed by the
 /// `libraries/<UUID>` part of the book URL, so parallel tests don't mix. Records never hold the token itself,
 /// only whether it matched.
+///
+/// 見立てを指すセッション（`configuration()` の設定で作ったもの）は、見立てを強く持つ。セッションが生きている間は
+/// 見立てもあるので、見立てを作って得たセッションだけを返す補助関数でも通信は成功する。
+///
+/// A session built from `configuration()` keeps the stub alive, so a helper that builds a stub and returns only
+/// the session still works.
 public final class StackNestStubServer: @unchecked Sendable {
     /// 要求の行き先。 / Where a request went.
     public enum Route: Hashable, Sendable {
+        /// manifest。 / The manifest.
         case manifest
+        /// 番号のページ。 / The page with this number.
         case page(Int)
+        /// 表紙。 / The cover.
         case cover
+        /// 読書位置の書き戻し。 / The progress write-back.
         case progress
         /// 基点の後ろのほかの道（基点の外なら `<outside>`）。 / Any other path under the base.
         case other(String)
@@ -33,8 +43,11 @@ public final class StackNestStubServer: @unchecked Sendable {
 
     /// 届いた要求の記録（鍵は持たない）。 / A recorded request (never the token).
     public struct RecordedRequest: Sendable, Hashable {
+        /// HTTP のメソッド。 / The HTTP method.
         public let method: String
+        /// 行き先。 / Where the request went.
         public let route: Route
+        /// 要求の URL。 / The request URL.
         public let url: URL
         /// `?maxw=` の値。 / The `?maxw=` value.
         public let maxWidth: Int?
@@ -58,6 +71,10 @@ public final class StackNestStubServer: @unchecked Sendable {
     private var log: [RecordedRequest] = []
     private var stopped = 0
 
+    /// 見立てを作る。作った時点で登録され、解放されると外れる。
+    ///
+    /// Creates a stub; it is registered on creation and unregistered when released.
+    ///
     /// - Parameters:
     ///   - pageCount: manifest が答えるページ数。 / The page count the manifest reports.
     ///   - direction: manifest が答える読む向き。 / The direction the manifest reports.
@@ -74,26 +91,33 @@ public final class StackNestStubServer: @unchecked Sendable {
         URL(string: "http://127.0.0.1:51234/api/v1/libraries/\(id)/books/1")!
     }
 
-    /// この見立てを指す参照ファイルの中身（`token` が期待の鍵になる）。
+    /// この見立てを指す参照ファイルの中身（`token` が期待の鍵になる。読む向きは見立ての `direction`：
+    /// `"rtl"`・`"ltr"` のほかはそのまま知らない値として渡る）。
     ///
-    /// A reference pointing at this stub (`token` becomes the expected token).
+    /// A reference pointing at this stub (`token` becomes the expected token; the reading direction follows the
+    /// stub's `direction`, and values other than `"rtl"`/`"ltr"` pass through as unknown).
     public func reference(token: String = "fixture-token", expiresAt: Date = .distantFuture,
                           startPage: Int = 0) throws -> StackNestBookReference
     {
-        let count = lock.withLock { () -> Int in
+        let (count, directionName) = lock.withLock { () -> (Int, String) in
             expectedToken = token
-            return pageCount
+            return (pageCount, direction)
         }
         return try StackNestBookReference(
             version: 1, title: "Fixture", bookURL: bookURL, token: token, expiresAt: expiresAt,
-            pageCount: count, direction: .rightToLeft, startPage: startPage)
+            pageCount: count, direction: StackNestReadingDirection(rawValue: directionName), startPage: startPage)
     }
 
-    /// 見立てを差し込んだセッションの設定。 / A session configuration routed to this stub.
+    /// 見立てを差し込んだセッションの設定。この設定で作ったセッションは見立てを強く持つ（セッションが生きている
+    /// 間は見立ても生きる）。
+    ///
+    /// A session configuration routed to this stub. A session built from it keeps the stub alive for as long as
+    /// the session lives.
     public func configuration() -> StackNestBookSession.Configuration {
         var configuration = StackNestBookSession.Configuration()
-        configuration.makeURLSessionConfiguration = {
-            let session = URLSessionConfiguration.ephemeral
+        configuration.makeURLSessionConfiguration = { [self] in
+            // Capturing `self` keeps the stub (registered weakly) alive with the session's configuration.
+            let session = withExtendedLifetime(self) { URLSessionConfiguration.ephemeral }
             session.protocolClasses = [StackNestStubProtocol.self]
             return session
         }
@@ -108,7 +132,12 @@ public final class StackNestStubServer: @unchecked Sendable {
     /// manifest が答えるページ数を変える。 / Changes the page count the manifest reports.
     public func setPageCount(_ count: Int) { lock.withLock { pageCount = count } }
 
-    /// 以後の `route` への応答を、返した門が開くまで止める。 / Holds responses for `route` until the gate opens.
+    /// 以後の `route` への応答を、返した門が開くまで止める。開け忘れても 60 秒で自動で流れる。同じ道に
+    /// 続けて呼ぶと門は置き換わり、古い門で止まった応答は、その門が開くか 60 秒たつまで止まったままになる。
+    ///
+    /// Holds responses for `route` until the returned gate opens. A gate never opened still releases its held
+    /// responses automatically after 60 seconds. Calling it again for the same route replaces the gate; responses
+    /// held by the old gate stay held until that gate opens or 60 seconds pass.
     public func gate(_ route: Route) -> StubGate {
         let gate = StubGate()
         lock.withLock { gates[route] = gate }
@@ -207,7 +236,11 @@ public final class StackNestStubServer: @unchecked Sendable {
     }
 }
 
-/// 応答を止めておく門。止めた要求が届いたことも知らせる。 / A gate that holds responses and reports arrivals.
+/// 応答を止めておく門。止めた要求が届いたことも知らせる。`open()` を呼び忘れても、止めた応答は 60 秒で自動で
+/// 流れる（試験のスレッドが残り続けないように）。
+///
+/// A gate that holds responses and reports arrivals. If `open()` is never called, held responses are released
+/// automatically after 60 seconds so test threads don't linger.
 public final class StubGate: @unchecked Sendable {
     private let released = DispatchGroup()
     private let arrivals = DispatchSemaphore(value: 0)

@@ -191,13 +191,13 @@ struct StackNestSessionRequestTests {
     @Test("URLSession はキャッシュ・クッキー・資格情報の保管を持たず、つながるのを待たない")
     func sessionHasNoPersistentStores() throws {
         let stub = StackNestStubServer()
-        let session = try makeSession(stub) {
-            $0.makeURLSessionConfiguration = {
-                let configuration = URLSessionConfiguration.default
-                configuration.protocolClasses = [] // 何を返しても外す
-                return configuration
-            }
-        }
+        let host = URLSessionConfiguration.default
+        host.protocolClasses = [] // 何を返しても外す
+        let session = try makeSession(stub) { $0.makeURLSessionConfiguration = { host } }
+        // ホストの設定は書き換えない（コピーに手を入れる）。
+        #expect(host.urlCache != nil)
+        #expect(host.httpCookieStorage != nil)
+        #expect(host.timeoutIntervalForResource == URLSessionConfiguration.default.timeoutIntervalForResource)
         let configuration = session.urlSessionConfigurationForTesting
         #expect(configuration.urlCache == nil)
         #expect(configuration.httpCookieStorage == nil)
@@ -236,6 +236,41 @@ struct StackNestSessionRequestTests {
         #expect(session.waiterCountForTesting(.page(index: 0, maxWidth: nil)) == 1, "後の人はまだ待っている")
         gate.open()
         #expect(StackNestFixtures.marker(of: try await second.value.data) == 0)
+    }
+
+    @Test("古い件の manifest の応答が後から記録されても、新しい manifest は残る")
+    func olderManifestResponseDoesNotOverwriteNewer() async throws {
+        let stub = StackNestStubServer(pageCount: 10)
+        let session = try makeSession(stub)
+        let older = try await session.fetch(.manifest, priority: .display)
+        stub.setPageCount(4)
+        #expect(try await session.manifest(refresh: true).pageCount == 4)
+        // 先に取った（件の古い）応答が最後に記録される。呼んだ人には読んだ値が返るが、状態は戻らない。
+        #expect(try session.recordManifest(older).pageCount == 10)
+        #expect(session.knownPageCountForTesting == 4)
+        #expect(session.cachedManifest?.pageCount == 4)
+        await #expect(throws: StackNestViewerError(.pageOutOfRange, pageCount: 4)) { try await session.page(7) }
+    }
+
+    @Test("見立てを作って返すだけの補助関数で作ったセッションでも通信できる（セッションが見立てを持つ）")
+    func sessionKeepsItsStubAlive() async throws {
+        func sessionOnly() throws -> StackNestBookSession {
+            let stub = StackNestStubServer(pageCount: 4)
+            return StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        }
+        let session = try sessionOnly()
+        #expect(StackNestFixtures.marker(of: try await session.page(2).data) == 2)
+    }
+
+    @Test("marker(of:) は Data の一部（スライス）からも読め、見立ての参照ファイルは direction: に従う")
+    func markerReadsSlicesAndReferenceHonoursDirection() throws {
+        let png = StackNestFixtures.pngPage(marker: 77)
+        let padded = Data(repeating: 0, count: 50) + png
+        #expect(StackNestFixtures.marker(of: padded[50...]) == 77)
+        #expect(StackNestFixtures.marker(of: png) == 77)
+        #expect(try StackNestStubServer(direction: "ltr").reference().direction == .leftToRight)
+        #expect(try StackNestStubServer().reference().direction == .rightToLeft)
+        #expect(try StackNestStubServer(direction: "vertical").reference().direction == .unknown("vertical"))
     }
 
     @Test("同じ manifest を同時に読んでも、要求は 1 件")

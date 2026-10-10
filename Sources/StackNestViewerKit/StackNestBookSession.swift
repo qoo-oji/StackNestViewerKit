@@ -118,9 +118,18 @@ public final class StackNestBookSession: @unchecked Sendable {
     ///
     /// A page (`index` is the 0-based StackNest page number). `maxWidth` becomes `?maxw=` (ignored when 0 or
     /// less). Out-of-range numbers, including negative ones, fail with `.pageOutOfRange` without a request.
+    ///
+    /// 1 回の呼び出しで最大 3 件の要求（範囲の確かめ直し・ページ・404 の後の読み直し）を出すことがあり、`waitLimit` は
+    /// 要求ごとに数えるので、最悪の場合は `waitLimit` の最大 3 倍まで待つ。閉じた後は（番号に関わらず）
+    /// `CancellationError`。
+    ///
+    /// One call can make up to three requests (the range re-check, the page, and the re-read after a 404), and
+    /// `waitLimit` is counted per request, so in the worst case it can take up to three times `waitLimit`.
+    /// After `close()` it throws `CancellationError` whatever the index.
     public func page(_ index: Int, maxWidth: Int? = nil,
                      priority: StackNestRequestPriority = .display) async throws -> StackNestPage
     {
+        if lock.withLock({ state.isClosed }) { throw CancellationError() }
         try await ensureInRange(index)
         do {
             let response = try await fetch(.page(index: index, maxWidth: Self.normalizedWidth(maxWidth)),
@@ -255,13 +264,18 @@ public final class StackNestBookSession: @unchecked Sendable {
 
     // MARK: - 顔に共通の部分
 
-    /// 読んだ manifest を記録する。ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
+    /// 読んだ manifest を記録する。より古い件の応答は、呼んだ人には返すが状態には反映しない（通し番号で判定）。
+    /// ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
     /// 先読みだけが待っている範囲の外の件は取り消す（以後、範囲の外へは要求を出さない）。
     func recordManifest(_ response: FetchedResponse) throws -> StackNestBookManifest {
         let manifest = try StackNestBookManifest.parse(response.data)
         let now = configuration.now()
         var effects = Effects()
         lock.withLock {
+            // A response from an older flight than the one already applied is returned to its caller
+            // but never overwrites the newer state (serials increase with every flight).
+            guard response.serial > state.manifestSerial else { return }
+            state.manifestSerial = response.serial
             if !state.isClosed { state.manifest = manifest }
             state.knownPageCount = manifest.pageCount
             state.hasConfirmedPageCount = true
@@ -312,7 +326,9 @@ public final class StackNestBookSession: @unchecked Sendable {
 
     /// キャッシュ・クッキー・資格情報の保管を持たない設定にする（鍵の付いた要求の結果をディスクへ残さない）。
     /// 1 回の要求の全体の時間（`timeoutIntervalForResource`）を `waitLimit`＋上乗せで絞る。
-    static func hardened(_ configuration: URLSessionConfiguration, waitLimit: Duration) -> URLSessionConfiguration {
+    static func hardened(_ host: URLSessionConfiguration, waitLimit: Duration) -> URLSessionConfiguration {
+        // Work on a copy: the host's object (possibly shared) stays untouched.
+        let configuration = (host.copy() as? URLSessionConfiguration) ?? host
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.httpCookieStorage = nil

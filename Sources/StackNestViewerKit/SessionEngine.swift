@@ -171,6 +171,12 @@ extension StackNestBookSession {
         lock.withLock {
             guard let flight = state.flights[key], flight.serial == serial else { return }
             state.flights[key] = nil
+            // Tag the response with its flight's serial so a late recorder can tell old from new.
+            var result = result
+            if case .success(var response) = result {
+                response.serial = flight.serial
+                result = .success(response)
+            }
             for (ticket, entry) in flight.waiters {
                 state.tickets[ticket] = nil
                 if state.prefetchTickets[key] == ticket { state.prefetchTickets[key] = nil }
