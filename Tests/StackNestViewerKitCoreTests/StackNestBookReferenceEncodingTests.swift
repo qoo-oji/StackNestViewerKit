@@ -53,6 +53,40 @@ struct StackNestBookReferenceEncodingTests {
         #expect(text.contains(#""expiresAt" : "2027-01-15T08:00:00Z""#))
     }
 
+    @Test("作る側は、読む側が断る値を受け付けない（天井の startPage・負の年の期限）。相対 URL も往復で == になる")
+    func producerRejectsWhatReaderRefuses() throws {
+        let expires = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(throws: StackNestViewerError(.invalidReference)) {
+            try StackNestBookReference(
+                version: 1, title: "t", bookURL: Self.goldenBook, token: "t", expiresAt: expires,
+                pageCount: 1, direction: .rightToLeft, startPage: 1_000_000_000_000_000)
+        }
+        #expect(throws: StackNestViewerError(.invalidReference)) {
+            try StackNestBookReference(
+                version: 1, title: "t", bookURL: Self.goldenBook, token: "t",
+                expiresAt: Date(timeIntervalSinceReferenceDate: -7e10),
+                pageCount: 1, direction: .rightToLeft, startPage: 0)
+        }
+        let edge = try StackNestBookReference(
+            version: 1, title: "t", bookURL: Self.goldenBook, token: "t", expiresAt: expires,
+            pageCount: 1, direction: .rightToLeft, startPage: 999_999_999_999_999)
+        #expect(try StackNestBookReference.parse(edge.encodedJSON()) == edge)
+        let relative = try StackNestBookReference(
+            version: 1, title: "t", bookURL: URL(string: "books/42", relativeTo: URL(string: "http://127.0.0.1:51234/api/v1/")!)!,
+            token: "t", expiresAt: expires, pageCount: 1, direction: .rightToLeft, startPage: 0)
+        #expect(try StackNestBookReference.parse(relative.encodedJSON()) == relative)
+    }
+
+    @Test("部品の読み手が、部品自身の golden を期待どおりに読む")
+    func kitReaderReadsGolden() throws {
+        let parsed = try StackNestBookReference.parse(try DocumentationSamples.data("reference-v1.stacknestbook"))
+        #expect(parsed == (try Self.goldenReference()))
+        #expect(parsed.title == "Example Book")
+        #expect(parsed.direction == .rightToLeft)
+        #expect(parsed.pageCount == 180)
+        #expect(parsed.startPage == 41)
+    }
+
     @Test("読んだ参照ファイルに direction が無ければ、書き直しても direction を書かない")
     func omitsMissingDirection() throws {
         let parsed = try StackNestBookReference.parse(StackNestBookReferenceTests.json(removing: ["direction"]))

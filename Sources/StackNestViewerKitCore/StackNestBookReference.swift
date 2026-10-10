@@ -43,9 +43,12 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
             throw StackNestViewerError(.unsupportedVersion, formatVersion: version)
         }
         guard Self.isAcceptableBookURL(bookURL), Self.isAcceptableToken(token),
-              (0...StackNestFormat.maxPageCount).contains(pageCount), startPage >= 0
+              (0...StackNestFormat.maxPageCount).contains(pageCount),
+              startPage >= 0, Double(startPage) < JSONValues.integerCeiling,
+              Self.isReadableDate(expiresAt)
         else { throw StackNestViewerError(.invalidReference) }
-        self.init(uncheckedVersion: version, title: title, bookURL: bookURL, token: token, expiresAt: expiresAt,
+        // 絶対形で持つ（相対 URL でも、書いて読み直した値と == になる）。
+        self.init(uncheckedVersion: version, title: title, bookURL: bookURL.absoluteURL, token: token, expiresAt: expiresAt,
                   pageCount: pageCount, direction: direction, startPage: startPage)
     }
 
@@ -128,6 +131,16 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
     public static func clampedStartPage(_ page: Int, pageCount: Int) -> Int {
         guard pageCount > 0 else { return 0 }
         return min(max(0, page), pageCount - 1)
+    }
+
+    /// 書き出す形（`encodedJSON()` と同じ ISO 8601）にして読み直せる日時か。負の年などは読めない。
+    private static func isReadableDate(_ date: Date) -> Bool {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode([date]),
+              let strings = (try? JSONSerialization.jsonObject(with: data)) as? [String], let string = strings.first
+        else { return false }
+        return JSONValues.date(string) != nil
     }
 
     /// 基点の検査: http(s)・空でないホスト・問い合わせと断片と資格情報を持たない。問い合わせ・断片があると、

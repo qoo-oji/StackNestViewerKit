@@ -2,12 +2,15 @@ import Foundation
 
 /// 参照ファイルと manifest の JSON の値の読み方（形式の文書の約束を 1 か所に置く）。
 enum JSONValues {
+    /// 整数として読む絶対値の上限（これ未満）。作る側の検査も同じ値を使う。
+    static let integerCeiling = 1e15
+
     /// JSON の整数。真偽値（`NSNumber` で来る）と整数でない数は整数とみなさない
     /// （`"version": true` を版 1 と読まない）。`1.0` のように小数点付きでも値が整数なら読む。
     static func integer(_ value: Any?) -> Int? {
         guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let double = number.doubleValue
-        guard double.rounded() == double, abs(double) < 1e15 else { return nil }
+        guard double.rounded() == double, abs(double) < integerCeiling else { return nil }
         return number.intValue
     }
 
