@@ -94,4 +94,62 @@ struct StackNestViewerErrorTests {
         let error = StackNestViewerError(.cannotConnect)
         #expect(error.errorDescription == error.message())
     }
+
+    @Test("すべてのコードの英日の文言が、仕様の表と一字一句同じ（app 名は Example Viewer・状態コードは 503 で描いた全文）")
+    func everyMessageMatchesTheSpecTable() {
+        let unexpected = (
+            "StackNest returned an unexpected response. Open the book from StackNest again.",
+            "StackNest から想定外の応答が返りました。StackNest から開き直してください。")
+        let expiredLink = (
+            "The link to this book has expired. Open the book from StackNest again.",
+            "この本を開くための期限が切れました。StackNest から開き直してください。")
+        let expected: [StackNestViewerError.Code: (en: String, ja: String)] = [
+            .invalidReference: (
+                "This file isn't a StackNest book reference, or it's damaged.",
+                "このファイルは StackNest の本の参照ファイルではないか、壊れています。"),
+            .unsupportedVersion: (
+                "This StackNest book reference uses a newer format. Update Example Viewer to open it.",
+                "この StackNest の参照ファイルは新しい形式です。開くには Example Viewer を更新してください。"),
+            .expired: expiredLink,
+            .unauthorized: expiredLink,
+            .libraryLocked: (
+                "Unlock the library in StackNest, then open the book from StackNest again.",
+                "StackNest でライブラリを解錠し、StackNest から開き直してください。"),
+            .bookNotFound: (
+                "This book is no longer in StackNest. Open it from StackNest again.",
+                "この本は StackNest にありません。StackNest から開き直してください。"),
+            .pageOutOfRange: (
+                "This page isn't in the book.",
+                "このページは本にありません。"),
+            .hostNotAllowed: (
+                "This book's address isn't on this Mac, so Example Viewer won't connect to it. Open the book from StackNest again.",
+                "この本の接続先がこの Mac ではないため、Example Viewer は接続しません。StackNest から開き直してください。"),
+            .cannotConnect: (
+                "StackNest isn't running, or its reading-position sync setting is off. Open the book from StackNest again.",
+                "StackNest が起動していないか、読書位置の同期の設定がオフです。StackNest から開き直してください。"),
+            .insecureConnectionBlocked: (
+                "This book's address isn't on this Mac or your local network, so Example Viewer can't reach it. Open the book from StackNest again.",
+                "この本の接続先は、この Mac やローカルネットワークの中にないため、Example Viewer から接続できません。StackNest から開き直してください。"),
+            .remoteUnavailable: (
+                "StackNest couldn't reach the remote library. Try again later.",
+                "StackNest がリモートのライブラリに接続できませんでした。しばらくしてからもう一度お試しください。"),
+            .responseTooLarge: unexpected,
+            .invalidResponse: unexpected,
+            .httpStatus: (
+                "StackNest returned an error (HTTP 503).",
+                "StackNest がエラーを返しました（HTTP 503）。"),
+        ]
+        #expect(Set(StackNestMessages.table.keys) == Set(StackNestMessages.knownCodes))
+        #expect(Set(expected.keys) == Set(StackNestMessages.knownCodes))
+        #expect(Set(StackNestMessages.knownCodes).count == StackNestMessages.knownCodes.count)
+        for (code, texts) in expected {
+            let error = StackNestViewerError(code, statusCode: 503, formatVersion: 2)
+            #expect(error.message(language: .english, appName: "Example Viewer") == texts.en, "\(code.rawValue) en")
+            #expect(error.message(language: .japanese, appName: "Example Viewer") == texts.ja, "\(code.rawValue) ja")
+        }
+        for language in [StackNestLanguage.english, .japanese] {
+            #expect(StackNestViewerError(.expired).message(language: language, appName: "Example Viewer")
+                    == StackNestViewerError(.unauthorized).message(language: language, appName: "Example Viewer"))
+        }
+    }
 }

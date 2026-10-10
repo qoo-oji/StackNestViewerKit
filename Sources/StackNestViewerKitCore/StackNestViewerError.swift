@@ -8,7 +8,13 @@ import Foundation
 public struct StackNestViewerError: Error, Sendable, Hashable, LocalizedError {
     /// 失敗の種類。 / The kind of failure.
     public struct Code: RawRepresentable, Sendable, Hashable {
+        /// コードを表す文字列。 / The string that names the code.
         public let rawValue: String
+
+        /// 文字列からコードを作る（ホストが独自のコードを作れる。表に無いコードの文言は「想定外の応答」）。
+        ///
+        /// Creates a code from a string (hosts can make their own; a code missing from the table gets the
+        /// "unexpected response" message).
         public init(rawValue: String) { self.rawValue = rawValue }
 
         /// 参照ファイルではない・壊れている・必須の項目が無い。 / Not a reference file, damaged, or missing a required key.
@@ -47,11 +53,13 @@ public struct StackNestViewerError: Error, Sendable, Hashable, LocalizedError {
     /// The kind used to avoid repeating a notice. `.expired` shares `.unauthorized`'s kind (same message);
     /// `.httpStatus` has one kind per status code (a 503 is shown after a 500).
     public struct NoticeKind: Sendable, Hashable {
+        /// 失敗の種類。 / The kind of failure.
         public let code: Code
         /// `.httpStatus` のときだけ入る。 / Set only for `.httpStatus`.
         public let statusCode: Int?
     }
 
+    /// 失敗の種類。 / The kind of failure.
     public let code: Code
     /// `.httpStatus` の状態コード。 / The status code of `.httpStatus`.
     public let statusCode: Int?
@@ -62,6 +70,9 @@ public struct StackNestViewerError: Error, Sendable, Hashable, LocalizedError {
     /// The known page count for `.pageOutOfRange`, so the host can shrink its page list.
     public let pageCount: Int?
 
+    /// 失敗を作る。付随する値は、そのコードで意味のあるものだけを渡す。
+    ///
+    /// Creates a failure. Pass only the values that mean something for the code.
     public init(_ code: Code, statusCode: Int? = nil, formatVersion: Int? = nil, pageCount: Int? = nil) {
         self.code = code
         self.statusCode = statusCode
@@ -96,5 +107,8 @@ public struct StackNestViewerError: Error, Sendable, Hashable, LocalizedError {
             .replacingOccurrences(of: "%@", with: appName ?? StackNestMessages.defaultAppName())
     }
 
+    /// `message()` と同じ（既定の言語・アプリの名前）。
+    ///
+    /// The same as `message()` (default language and app name).
     public var errorDescription: String? { message() }
 }
