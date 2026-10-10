@@ -97,12 +97,23 @@ struct PublicAPITests {
     }
 
     @Test("画素データが 65,535 バイトを超える PNG も画像として読め、目印が読み戻せる")
-    func largePngPageDecodes() {
+    func largePngPageDecodes() throws {
         // stored ブロックは 1 つ 65,535 バイトまでなので、それを超える大きさでブロックの分割が正しいかを見る。
         let png = StackNestFixtures.pngPage(width: 300, height: 300, marker: 77)
-        #expect(300 * 301 > 65_535)
-        let image = CGImageSourceCreateWithData(png as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) }
-        #expect(image?.width == 300 && image?.height == 300)
+        // IDAT の本文は zlib: 見出し 2 バイト・stored ブロック・Adler-32 の 4 バイト。
+        let start = try #require(png.range(of: Data("IDAT".utf8))?.upperBound)
+        let length = png[(start - 8)..<(start - 4)].reduce(0) { $0 << 8 | Int($1) }
+        let deflate = Data(png[(start + 2)..<(start + length - 4)])
+        // ImageIO は壊れた zlib も読んでしまうので、まず生の DEFLATE を自分で展開して枠組みを確かめる（ブロックが 2 つ以上）。
+        #expect(deflate.count > 65_535 + 10)
+        let raw = try (deflate as NSData).decompressed(using: .zlib) as Data
+        #expect(raw.count == 300 * 301)
+        #expect(raw.enumerated().allSatisfy { $0.offset % 301 == 0 ? $0.element == 0 : $0.element == 77 })
+        // NLEN や Adler-32 の誤りは展開では見えないので、画素まで復号して全画素が目印と一致することも確かめる。
+        let image = try #require(CGImageSourceCreateWithData(png as CFData, nil).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        #expect(image.width == 300 && image.height == 300)
+        let pixels = try #require(image.dataProvider?.data as Data?)
+        #expect((0..<300).allSatisfy { y in (0..<300).allSatisfy { pixels[pixels.startIndex + y * image.bytesPerRow + $0] == 77 } })
         #expect(StackNestFixtures.marker(of: png) == 77)
     }
 }
