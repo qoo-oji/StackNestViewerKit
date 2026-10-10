@@ -26,9 +26,15 @@ class Base(unittest.TestCase):
         self.root = Path(self.directory.name)
         self.repo = self.root / "work"
         (self.repo / "Scripts" / "githooks").mkdir(parents=True)
-        for path in SCRIPTS.rglob("*"):
-            if path.is_file():
-                shutil.copy2(path, self.repo / "Scripts" / path.relative_to(SCRIPTS))
+        # Copy only the tracked files: an ignored __pycache__ or editor leftover must not change what is tested.
+        listing = subprocess.run(["git", "ls-files", "-z", "Scripts"], cwd=SCRIPTS.parent, check=True,
+                                 capture_output=True).stdout
+        for name in filter(None, listing.decode("utf-8").split("\0")):
+            source = SCRIPTS.parent / name
+            if source.is_file():
+                destination = self.repo / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "shelfsmith")
         self.git("config", "user.email", "290546180+shelfsmith@users.noreply.github.com")

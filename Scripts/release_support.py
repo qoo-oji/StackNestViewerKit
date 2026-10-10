@@ -10,6 +10,9 @@ import re
 # 内部の印の語彙。pre-push と手作業の点検（check-internal-markers.sh）と同じ 1 つのファイルを読む。
 MARKERS_FILE = Path(__file__).resolve().parent / "internal-markers.txt"
 
+# 版を宣言するファイル。リリースの前の検査と公開が同じ読み方をする。
+INFO = "Sources/StackNestViewerKitCore/StackNestViewerKitInfo.swift"
+
 
 def stable_version(tag):
     """`X.Y.Z`（または `vX.Y.Z`）の確定版なら (X, Y, Z) を、ほかは None を返す。"""
@@ -37,15 +40,20 @@ def release_entry(changelog, version):
     except ValueError as error:
         raise ValueError("見出しの日付が実在しません / The heading's date doesn't exist") from error
     notes = re.split(r"^## ", changelog[heading.end():], maxsplit=1, flags=re.MULTILINE)[0].strip()
-    if not notes:
-        raise ValueError("その版の本文が空です / The version's notes are empty")
+    # 見出しだけの項目は空とみなす（Release の本文が見出し 1 行になるのを防ぐ）。
+    if not any(line.strip() and not line.lstrip().startswith("#") for line in notes.splitlines()):
+        raise ValueError("その版の本文が空です（見出しだけでは足りません） / The version's notes are empty (headings alone aren't enough)")
     return released, notes + "\n"
 
 
 def marker_patterns(path=MARKERS_FILE):
     """内部の印の語彙（# で始まる行と空行を除いた拡張正規表現）。"""
     lines = Path(path).read_text(encoding="utf-8").splitlines()
-    return [re.compile(line.strip()) for line in lines if line.strip() and not line.lstrip().startswith("#")]
+    patterns = [re.compile(line.strip()) for line in lines if line.strip() and not line.lstrip().startswith("#")]
+    # 語彙が空なら何も見つからず通ってしまうので、番人のシェル（check-internal-markers.sh）と同じく止める。
+    if not patterns:
+        raise ValueError(f"内部の印の語彙が空です。検査できません / The internal-marker vocabulary is empty: {path}")
+    return patterns
 
 
 def private_markers(text, path=MARKERS_FILE):
@@ -54,3 +62,8 @@ def private_markers(text, path=MARKERS_FILE):
     for pattern in marker_patterns(path):
         found.update(match.group(0) for match in pattern.finditer(text))
     return sorted(found)
+
+
+def declared_versions(source):
+    """StackNestViewerKitInfo.swift の `public static let version = "X.Y.Z"` の値の一覧（宣言が 1 つでなければ呼び出し側が止める）。"""
+    return re.findall(r'^\s*public\s+static\s+let\s+version\s*=\s*"([^"\n]+)"\s*$', source, re.MULTILINE)

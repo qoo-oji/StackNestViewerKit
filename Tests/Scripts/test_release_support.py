@@ -3,11 +3,12 @@
 from datetime import date
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "Scripts"))
-from release_support import private_markers, release_entry, stable_version  # noqa: E402
+from release_support import declared_versions, marker_patterns, private_markers, release_entry, stable_version  # noqa: E402
 
 CHANGELOG = """# 変更履歴 / Changelog
 
@@ -58,6 +59,17 @@ class ReleaseEntryTests(unittest.TestCase):
             release_entry(CHANGELOG + "\n## [0.1.0] - 2026-10-21\n- again\n", "0.1.0")
 
 
+    def test_rejects_an_entry_with_only_headings(self):
+        with self.assertRaises(ValueError):
+            release_entry("## [0.1.0] - 2026-10-20\n\n### 追加 / Added\n\n### 修正 / Fixed\n\n## [0.0.1] - 2026-10-01\n- x\n", "0.1.0")
+
+
+class DeclaredVersionTests(unittest.TestCase):
+    def test_reads_the_declaration(self):
+        self.assertEqual(declared_versions('public enum I {\n    public static let version = "0.1.0"\n}\n'), ["0.1.0"])
+        self.assertEqual(declared_versions('let version: String = "0.1.0"\n'), [])
+
+
 class PrivateMarkerTests(unittest.TestCase):
     def test_finds_every_kind_of_marker(self):
         # 試験の文面も匿名性の点検に掛からないよう、印は組み立てて作る。
@@ -82,6 +94,16 @@ class PrivateMarkerTests(unittest.TestCase):
     def test_the_vocabulary_file_does_not_flag_itself(self):
         vocabulary = (Path(__file__).resolve().parents[2] / "Scripts/internal-markers.txt").read_text()
         self.assertEqual(private_markers(vocabulary), [])
+
+    def test_an_empty_vocabulary_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for content in ["", "# comments only\n\n   \n"]:
+                vocabulary = Path(directory) / "markers.txt"
+                vocabulary.write_text(content)
+                with self.assertRaises(ValueError):
+                    marker_patterns(vocabulary)
+                with self.assertRaises(ValueError):
+                    private_markers("anything", vocabulary)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ import tempfile
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "Scripts"))
-from release_support import private_markers, release_entry, stable_version  # noqa: E402
+from release_support import INFO, declared_versions, private_markers, release_entry, stable_version  # noqa: E402
 
 
 def run(*args):
@@ -28,8 +28,8 @@ def paged(repository, resource):
 
 def publish(tag, repository):
     version = stable_version(tag)
-    if version is None:
-        raise ValueError("タグは X.Y.Z の確定版で指定してください / The tag must be a release version X.Y.Z")
+    if version is None or tag.startswith("v"):
+        raise ValueError("タグは X.Y.Z の確定版で指定してください（v は付けない） / The tag must be a release version X.Y.Z, without a v prefix")
     tags = paged(repository, "tags")
     if not any(item["name"] == tag for item in tags):
         raise ValueError("公開先にそのタグがありません / The tag isn't on the remote")
@@ -42,6 +42,9 @@ def publish(tag, repository):
                 raise ValueError("同じタグの下書きがあります。確かめて手で公開してください / A draft exists; publish it by hand")
             print(f"公開済みなので変えません / Already published: {release['html_url']}")
             return
+    # 上で HEAD がタグのコミットと同じだと確かめたので、HEAD の StackNestViewerKitInfo.version がタグのコミットの宣言になる。
+    if declared_versions(run("git", "show", f"HEAD:{INFO}")) != [tag]:
+        raise ValueError("StackNestViewerKitInfo.version がタグと違います / StackNestViewerKitInfo.version doesn't match the tag")
     # 作業ツリーではなく、CI が検証したコミットから本文を取る。
     _, notes = release_entry(run("git", "show", "HEAD:CHANGELOG.md"), tag)
     markers = private_markers(notes)
@@ -64,8 +67,13 @@ def main():
     arguments = parser.parse_args()
     try:
         publish(arguments.tag, arguments.repo)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
-        detail = error.stderr if isinstance(error, subprocess.CalledProcessError) else str(error)
+    except (ValueError, OSError, subprocess.CalledProcessError, KeyError, TypeError, AttributeError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            detail = error.stderr
+        elif isinstance(error, (KeyError, TypeError, AttributeError)):
+            detail = f"API の応答の形が想定と違います / Unexpected API response shape: {type(error).__name__} {error}"
+        else:
+            detail = str(error)
         print(f"GitHub Release を作れませんでした / Couldn't publish the release: {detail}", file=sys.stderr)
         return 1
     return 0

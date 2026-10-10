@@ -10,6 +10,7 @@ import textwrap
 import unittest
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "Scripts"
+INFO = 'public enum StackNestViewerKitInfo {\n    public static let version = "{version}"\n}\n'
 CHANGELOG = "# 変更履歴 / Changelog\n\n## [0.1.0] - 2026-10-20\n\n### 追加 / Added\n- 最初の版 / First release\n"
 
 FAKE_GH = textwrap.dedent('''\
@@ -19,6 +20,9 @@ FAKE_GH = textwrap.dedent('''\
     with open(os.environ["FAKE_GH_LOG"], "a") as log:
         log.write(json.dumps(sys.argv[1:]) + "\\n")
     args = sys.argv[1:]
+    if args[:2] == ["release", "create"] and state.get("fail_create"):
+        print("HTTP 422: Validation Failed", file=sys.stderr)
+        sys.exit(1)
     if args[:3] == ["api", "--paginate", "--slurp"]:
         resource = args[3].rsplit("/", 1)[1]
         print(json.dumps([state[resource]]))
@@ -43,6 +47,7 @@ class PublishTests(unittest.TestCase):
         for name in ["publish-github-release.py", "release_support.py", "internal-markers.txt"]:
             shutil.copy2(SCRIPTS / name, self.repo / "Scripts" / name)
         (self.repo / "CHANGELOG.md").write_text(CHANGELOG)
+        self.write_info("0.1.0")
         env = {**os.environ, "GIT_AUTHOR_NAME": "shelfsmith", "GIT_COMMITTER_NAME": "shelfsmith",
                "GIT_AUTHOR_EMAIL": "s@example.com", "GIT_COMMITTER_EMAIL": "s@example.com"}
         for args in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-q", "-m", "Release"]):
@@ -58,13 +63,18 @@ class PublishTests(unittest.TestCase):
         self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_GH_STATE": str(self.state_file),
                     "FAKE_GH_LOG": str(self.log_file)}
 
+    def write_info(self, version):
+        info = self.repo / "Sources/StackNestViewerKitCore/StackNestViewerKitInfo.swift"
+        info.parent.mkdir(parents=True, exist_ok=True)
+        info.write_text(INFO.replace("{version}", version))
+
     def tearDown(self):
         self.directory.cleanup()
 
-    def publish(self, tags=("0.1.0",), sha=None, releases=()):
+    def publish(self, tags=("0.1.0",), sha=None, releases=(), tag="0.1.0", fail_create=False):
         self.state_file.write_text(json.dumps({"tags": [{"name": t} for t in tags], "sha": sha or self.sha,
-                                               "releases": list(releases)}))
-        return subprocess.run([str(self.repo / "Scripts/publish-github-release.py"), "0.1.0", "--repo", "example/kit"],
+                                               "releases": list(releases), "fail_create": fail_create}))
+        return subprocess.run([str(self.repo / "Scripts/publish-github-release.py"), tag, "--repo", "example/kit"],
                               cwd=self.repo, capture_output=True, text=True, env=self.env)
 
     def log(self):
@@ -111,6 +121,44 @@ class PublishTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         create = next(entry for entry in self.log() if isinstance(entry, list) and entry[:2] == ["release", "create"])
         self.assertIn("--latest=false", create)
+
+
+    def test_reports_a_failure_of_gh(self):
+        result = self.publish(fail_create=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("HTTP 422", result.stderr)
+
+    def test_refuses_tags_that_are_not_plain_release_versions(self):
+        for tag in ["v0.1.0", "0.1.0-rc1", "latest"]:
+            result = self.publish(tags=(tag,), tag=tag)
+            self.assertEqual(result.returncode, 1, tag)
+            self.assertIn("X.Y.Z", result.stderr, tag)
+            self.assertFalse(any(isinstance(e, list) and e[:2] == ["release", "create"] for e in self.log()), tag)
+
+    def test_refuses_a_version_that_differs_from_the_tag(self):
+        self.write_info("0.0.9")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "shelfsmith", "GIT_COMMITTER_NAME": "shelfsmith",
+               "GIT_AUTHOR_EMAIL": "s@example.com", "GIT_COMMITTER_EMAIL": "s@example.com"}
+        subprocess.run(["git", "commit", "-qam", "Older version"], cwd=self.repo, check=True, env=env)
+        self.sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, check=True, capture_output=True,
+                                  text=True).stdout.strip()
+        result = self.publish()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("StackNestViewerKitInfo.version", result.stderr)
+        self.assertFalse(any(isinstance(e, list) and e[:2] == ["release", "create"] for e in self.log()))
+
+    def test_a_malformed_api_object_is_a_clean_error(self):
+        result = self.publish(releases=[{"tag_name": "0.1.0"}])
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("Unexpected API response", result.stderr)
+
+    def test_an_empty_vocabulary_refuses_instead_of_publishing(self):
+        (self.repo / "Scripts/internal-markers.txt").write_text("# comments only\n")
+        result = self.publish()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("vocabulary", result.stderr)
+        self.assertFalse(any(isinstance(e, list) and e[:2] == ["release", "create"] for e in self.log()))
 
 
 if __name__ == "__main__":

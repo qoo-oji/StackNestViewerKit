@@ -29,6 +29,7 @@ class ReleaseScriptTests(unittest.TestCase):
         self.identifiers.write_text("zzcanaryword\n")
         self.env = {**os.environ, **IDENTITY, "STACKNEST_PRIVATE_IDENTIFIERS_FILE": str(self.identifiers)}
         self.git("init", "-q", "-b", "main")
+        self.git("config", "core.hooksPath", "Scripts/githooks")
         self.write_release("0.1.0", CHANGELOG)
         self.commit("Prepare 0.1.0")
         subprocess.run(["git", "init", "-q", "--bare", str(self.remote)], check=True)
@@ -55,6 +56,12 @@ class ReleaseScriptTests(unittest.TestCase):
         return subprocess.run([str(self.repo / "Scripts/release.sh"), version], cwd=self.repo, capture_output=True,
                               text=True, env=self.env)
 
+    def refused(self, text, version="0.1.0"):
+        result = self.release(version)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(text, result.stderr)
+        return result
+
     def test_passes_for_a_clean_first_release(self):
         result = self.release()
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -62,44 +69,93 @@ class ReleaseScriptTests(unittest.TestCase):
 
     def test_refuses_a_dirty_tree(self):
         (self.repo / "untracked.txt").write_text("x")
-        self.assertIn("clean", self.release().stderr)
+        self.refused("clean")
 
     def test_refuses_a_version_mismatch(self):
         self.write_release("0.0.9", CHANGELOG)
         self.commit("Wrong version")
-        self.assertIn("StackNestViewerKitInfo.version", self.release().stderr)
+        self.refused("StackNestViewerKitInfo.version")
 
     def test_refuses_a_version_that_is_not_newer(self):
         self.git("tag", "0.1.0")
         self.git("push", "-q", "origin", "0.1.0")
-        self.assertIn("Not newer", self.release().stderr)
+        self.refused("Not newer")
 
     def test_refuses_a_session_trailer(self):
         (self.repo / "note.txt").write_text("x")
         self.git("add", "note.txt")
         self.git("commit", "-q", "-m", "Note", "-m", "Claude-Session: https://claude.ai/code/" + "session_example")
-        self.assertIn("check-commit-trailers.sh", self.release().stderr)
+        self.refused("check-commit-trailers.sh")
 
     def test_refuses_internal_markers_in_the_tree(self):
         (self.repo / "note.txt").write_text("see docs/super" + "powers/specs\n")
         self.commit("Note")
-        self.assertIn("check-internal-markers.sh", self.release().stderr)
+        self.refused("check-internal-markers.sh")
 
     def test_refuses_another_author(self):
         (self.repo / "note.txt").write_text("x")
         self.commit("Note", env={**self.env, "GIT_AUTHOR_NAME": "someone"})
-        self.assertIn("shelfsmith", self.release().stderr)
+        self.refused("shelfsmith")
 
     def test_refuses_private_markers_in_the_entry(self):
         phase = "G" + "99"  # 試験の文面が匿名性の点検に掛からないよう組み立てる
         self.write_release("0.1.0", CHANGELOG.replace("First release", f"First release ({phase})"))
         self.commit("Mention a phase")
-        self.assertIn(phase, self.release().stderr)
+        self.refused(phase)
 
     def test_refuses_identifiers_in_the_tree(self):
         (self.repo / "note.txt").write_text("zzcanaryword")
         self.commit("Note")
-        self.assertIn("check-private-identifiers.sh", self.release().stderr)
+        self.refused("check-private-identifiers.sh")
+
+
+    def test_refuses_a_marker_added_and_removed_within_the_range(self):
+        # The tree is clean at HEAD, so only the range check can see it.
+        (self.repo / "note.txt").write_text("see docs/super" + "powers/specs\n")
+        self.commit("Add note")
+        self.git("rm", "-q", "note.txt")
+        self.git("commit", "-q", "-m", "Remove note")
+        self.refused("check-internal-markers.sh")
+
+    def test_refuses_a_committer_only_mismatch(self):
+        (self.repo / "note.txt").write_text("x")
+        self.commit("Note", env={**self.env, "GIT_COMMITTER_NAME": "someone"})
+        self.refused("shelfsmith")
+
+    def test_names_the_changelog_entry_when_it_holds_a_marker(self):
+        phase = "G" + "99"
+        self.write_release("0.1.0", CHANGELOG.replace("First release", f"First release ({phase})"))
+        self.commit("Mention a phase")
+        self.refused("changelog entry")
+
+    def test_refuses_an_entry_with_only_a_heading(self):
+        self.write_release("0.1.0", CHANGELOG.replace("- 最初の版 / First release\n", ""))
+        self.commit("Empty entry")
+        self.refused("empty")
+
+    def test_refuses_when_the_hooks_are_not_installed(self):
+        self.git("config", "--unset", "core.hooksPath")
+        self.refused("core.hooksPath")
+        self.git("config", "core.hooksPath", ".git/hooks")
+        self.refused("core.hooksPath")
+
+    def test_refuses_a_tag_whose_commit_is_missing_locally(self):
+        other = Path(self.directory.name) / "other"
+        subprocess.run(["git", "clone", "-q", str(self.remote), str(other)], check=True, capture_output=True)
+        (other / "x.txt").write_text("x")
+        for args in (["add", "x.txt"], ["commit", "-q", "-m", "Elsewhere"], ["tag", "0.0.9"], ["push", "-q", "origin", "0.0.9"]):
+            subprocess.run(["git", *args], cwd=other, check=True, capture_output=True, env=self.env)
+        self.refused("git fetch --tags")
+
+    def test_uses_the_remote_tag_not_the_local_one_as_the_range_base(self):
+        self.git("tag", "0.0.9")
+        self.git("push", "-q", "origin", "0.0.9")
+        (self.repo / "note.txt").write_text("see docs/super" + "powers/specs\n")
+        self.commit("Add note")
+        self.git("rm", "-q", "note.txt")
+        self.git("commit", "-q", "-m", "Remove note")
+        self.git("tag", "-f", "0.0.9")  # the local tag moves past the commit that added the marker
+        self.refused("check-internal-markers.sh")
 
 
 if __name__ == "__main__":
