@@ -57,14 +57,11 @@ while !arguments.isEmpty {
 }
 
 guard let folder, let referenceOut else { fail("--folder and --reference-out are required") }
-let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif"]
-let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-    .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
-    .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+let files = FakeStackNestServer.Options.imageFiles(in: folder)
 guard !files.isEmpty else { fail("no images in \(folder.path)") }
 
-var options = FakeStackNestServer.Options(pages: files.compactMap { try? Data(contentsOf: $0) })
-options.contentType = files[0].pathExtension.lowercased() == "png" ? "image/png" : "image/jpeg"
+// Each page is served with the type of its own file extension.
+var options = FakeStackNestServer.Options(imageFiles: files)
 if let token { options.token = token }
 options.redirects = redirects
 options.delays = delays

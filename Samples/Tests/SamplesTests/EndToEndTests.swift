@@ -42,6 +42,33 @@ struct EndToEndTests {
         #expect(!String(decoding: try server.recordsJSON(), as: UTF8.self).contains("fake-server-token"))
     }
 
+    @Test("フォルダの画像は、ページごとに自分の種類で配る（PNG と JPEG の混在・表紙は 0 番と同じ）。WebP だけなら image/webp")
+    func eachPageIsServedWithItsOwnType() async throws {
+        func folder(_ names: [String]) throws -> [URL] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("kit-types-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            for (index, name) in names.enumerated() {
+                try Data([UInt8(index), 1, 2, 3]).write(to: directory.appendingPathComponent(name))
+            }
+            return FakeStackNestServer.Options.imageFiles(in: directory)
+        }
+        func types(_ files: [URL]) async throws -> (pages: [String?], cover: String?) {
+            let server = FakeStackNestServer(options: FakeStackNestServer.Options(imageFiles: files))
+            _ = try server.start()
+            defer { server.stop() }
+            let session = try StackNestBookSession(contentsOf: try writeReference(try server.reference()))
+            var pages: [String?] = []
+            for index in 0..<files.count { pages.append(try await session.page(index).contentType) }
+            return (pages, try await session.cover().contentType)
+        }
+        let mixed = try await types(try folder(["1.png", "2.JPG", "3.jpeg", "4.gif"]))
+        #expect(mixed.pages == ["image/png", "image/jpeg", "image/jpeg", "image/gif"])
+        #expect(mixed.cover == "image/png")
+        let webp = try await types(try folder(["a.webp", "b.webp"]))
+        #expect(webp.pages == ["image/webp", "image/webp"])
+        #expect(webp.cover == "image/webp")
+    }
+
     @Test("ホストの設定にプロキシ（死んだポート・除外なし）があっても、プロキシを通らず本物のソケットへ届く")
     func hostProxyIsNotUsed() async throws {
         let server = try startServer()

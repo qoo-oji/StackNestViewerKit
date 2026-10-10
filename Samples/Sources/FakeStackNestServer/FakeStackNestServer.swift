@@ -12,8 +12,12 @@ public final class FakeStackNestServer: @unchecked Sendable {
     public struct Options: Sendable {
         /// ページの画像（番号順）。 / Page images, in order.
         public var pages: [Data]
-        /// ページの `Content-Type`。 / The pages' content type.
+        /// ページの `Content-Type`（`pageContentTypes` に無いページの既定）。 / The default content type for pages
+        /// without an entry in `pageContentTypes`.
         public var contentType = "image/png"
+        /// ページごとの `Content-Type`（番号順。足りない分は `contentType`）。表紙は 0 番のページと同じ。
+        /// Per-page content types, in order (missing entries use `contentType`). The cover uses page 0's.
+        public var pageContentTypes: [String] = []
         /// 受け付ける鍵。 / The accepted token.
         public var token = "fake-server-token"
         public var libraryID = "00000000-0000-4000-8000-000000000001"
@@ -25,6 +29,37 @@ public final class FakeStackNestServer: @unchecked Sendable {
         public var delays: [String: TimeInterval] = [:]
 
         public init(pages: [Data]) { self.pages = pages }
+
+        /// 画像のファイル（番号順）から作る。種類は拡張子から決める（png・jpg・jpeg・webp・gif）。
+        /// Builds from image files (in page order); each page's type comes from its file extension.
+        public init(imageFiles: [URL]) {
+            let loaded = imageFiles.compactMap { url in (try? Data(contentsOf: url)).map { (url, $0) } }
+            self.init(pages: loaded.map(\.1))
+            pageContentTypes = loaded.map { Self.contentType(forExtension: $0.0.pathExtension) }
+        }
+
+        /// 拡張子（大文字小文字を問わない）の `Content-Type`。知らない拡張子は `application/octet-stream`。
+        public static func contentType(forExtension fileExtension: String) -> String {
+            switch fileExtension.lowercased() {
+            case "png": "image/png"
+            case "jpg", "jpeg": "image/jpeg"
+            case "webp": "image/webp"
+            case "gif": "image/gif"
+            default: "application/octet-stream"
+            }
+        }
+
+        /// フォルダの中の画像のファイル（名前の自然順）。 / Image files in a folder, in natural name order.
+        public static func imageFiles(in folder: URL) -> [URL] {
+            let extensions: Set<String> = ["png", "jpg", "jpeg", "webp", "gif"]
+            return ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+                .filter { extensions.contains($0.pathExtension.lowercased()) }
+                .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        }
+
+        func contentType(ofPage index: Int) -> String {
+            pageContentTypes.indices.contains(index) ? pageContentTypes[index] : contentType
+        }
     }
 
     /// 受けた要求の記録。 / A recorded request.
@@ -189,14 +224,15 @@ public final class FakeStackNestServer: @unchecked Sendable {
                                  body: (try? JSONSerialization.data(withJSONObject: body)) ?? Data())
         case ("GET", "cover"):
             guard let first = options.pages.first else { return Self.response(404) }
-            return Self.response(200, headers: ["Content-Type": options.contentType], body: first)
+            return Self.response(200, headers: ["Content-Type": options.contentType(ofPage: 0)], body: first)
         case ("POST", "progress"):
             return Self.response(200, headers: ["Content-Type": "application/json"], body: Data("{}".utf8))
         default:
             if method == "GET", route.hasPrefix("pages/"), let index = Int(route.dropFirst("pages/".count)),
                options.pages.indices.contains(index)
             {
-                return Self.response(200, headers: ["Content-Type": options.contentType], body: options.pages[index])
+                return Self.response(200, headers: ["Content-Type": options.contentType(ofPage: index)],
+                                     body: options.pages[index])
             }
             return Self.response(404)
         }
