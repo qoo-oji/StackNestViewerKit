@@ -18,11 +18,18 @@ public struct StackNestViewerIdentification: Sendable, Hashable {
     /// bundle id・版・部品の版に使える文字。 / Characters allowed in the bundle ID and versions.
     public static let componentCharacters = "[A-Za-z0-9._+-]"
 
+    /// ビューアの bundle id。 / The viewer's bundle ID.
     public let bundleIdentifier: String
+    /// ビューアの版（無ければ nil）。 / The viewer's version, or nil.
     public let version: String?
+    /// 読む参照ファイルの版（無ければ nil）。 / The reference file version, or nil.
     public let format: Int?
+    /// 部品の版 `kit=`（無ければ nil）。 / The kit version (`kit=`), or nil.
     public let kitVersion: String?
 
+    /// 名乗りを作る。`kitVersion` の既定は、この部品の版。
+    ///
+    /// Creates an identification. `kitVersion` defaults to this kit's own version.
     public init(bundleIdentifier: String, version: String?, format: Int?,
                 kitVersion: String? = StackNestViewerKitInfo.version)
     {
@@ -85,7 +92,8 @@ public struct StackNestViewerIdentification: Sendable, Hashable {
         let product = parts[0].trimmingCharacters(in: .whitespaces)
         let slash = product.firstIndex(of: "/")
         let bundle = slash.map { String(product[..<$0]) } ?? product
-        guard !bundle.isEmpty, bundle.unicodeScalars.allSatisfy(isComponentScalar) else { return nil }
+        guard !bundle.isEmpty, bundle.unicodeScalars.count <= maxComponentLength,
+              bundle.unicodeScalars.allSatisfy(isComponentScalar) else { return nil }
         var version = slash.map { String(product[product.index(after: $0)...]).trimmingCharacters(in: .whitespaces) }
         if version?.isEmpty == true { version = nil }
         version = version.map { String($0.prefix(maxComponentLength)) }
@@ -98,7 +106,9 @@ public struct StackNestViewerIdentification: Sendable, Hashable {
             let rawValue = pair[pair.index(after: equals)...].trimmingCharacters(in: .whitespaces)
             switch key {
             case "format": format = Int(rawValue)
-            case "kit": kit = rawValue.isEmpty ? nil : String(rawValue.prefix(maxKitVersionLength))
+            case "kit":
+                let cut = String(rawValue.prefix(maxKitVersionLength))
+                kit = !cut.isEmpty && cut.unicodeScalars.allSatisfy(isComponentScalar) ? cut : nil
             default: continue
             }
         }
@@ -112,10 +122,24 @@ public struct StackNestViewerIdentification: Sendable, Hashable {
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    static func isComponentScalar(_ scalar: Unicode.Scalar) -> Bool {
-        switch scalar {
-        case "A"..."Z", "a"..."z", "0"..."9", ".", "_", "+", "-": return true
-        default: return false
+    /// `componentCharacters` が表す文字の集合（その文字列から作る＝定義は 1 つ）。
+    private static let componentScalarValues: Set<UInt32> = {
+        let body = Array(componentCharacters.unicodeScalars.dropFirst().dropLast())
+        var values = Set<UInt32>()
+        var index = 0
+        while index < body.count {
+            if index + 2 < body.count, body[index + 1] == "-" {
+                values.formUnion(body[index].value...body[index + 2].value)
+                index += 3
+            } else {
+                values.insert(body[index].value)
+                index += 1
+            }
         }
+        return values
+    }()
+
+    static func isComponentScalar(_ scalar: Unicode.Scalar) -> Bool {
+        componentScalarValues.contains(scalar.value)
     }
 }

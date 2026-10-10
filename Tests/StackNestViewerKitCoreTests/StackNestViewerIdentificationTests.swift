@@ -94,6 +94,44 @@ struct StackNestViewerIdentificationTests {
         }
     }
 
+    @Test("読む側は StackNest と同じ厳しさ: bundle id は 64 文字まで、kit= は文字種と 16 文字、format は整数")
+    func parseIsAsStrictAsStackNest() {
+        typealias ID = StackNestViewerIdentification
+        let id64 = "com." + String(repeating: "a", count: 60)
+        #expect(ID.parse(id64 + "/1")?.bundleIdentifier == id64)
+        #expect(ID.parse(id64 + "a/1") == nil, "65 文字の bundle id は名乗りの形ではない")
+        let base = ID(bundleIdentifier: "com.example.viewer", version: "1.0", format: 1, kitVersion: nil)
+        #expect(ID.parse("com.example.viewer/1.0; kit=0.1 0; format=1") == base, "文字種の外の kit= は捨てる")
+        #expect(ID.parse("com.example.viewer/1.0; format=1; kit=0.1(beta)") == base)
+        #expect(ID.parse("com.example.viewer/1.0; format=1; kit=")?.kitVersion == nil)
+        #expect(ID.parse("com.example.viewer/1.0; format=1; kit=" + String(repeating: "7", count: 30))?.kitVersion
+                == String(repeating: "7", count: 16), "kit= は 16 文字で切る")
+        #expect(ID.parse("com.example.viewer/1.0; format=" + String(repeating: "9", count: 30))?.format == nil,
+                "整数に収まらない format は読まない")
+        #expect(ID.parse("com.example.viewer/; format=1")?.version == nil)
+        // componentCharacters と isComponentScalar は同じ定義（ASCII 全域で照合）。
+        let regex = try! NSRegularExpression(pattern: "^" + ID.componentCharacters + "$")
+        for value in UInt32(0)...0x7F {
+            let scalar = Unicode.Scalar(value)!
+            let text = String(Character(scalar))
+            let expected = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+            #expect(ID.isComponentScalar(scalar) == expected, "U+\(String(value, radix: 16))")
+        }
+    }
+
+    @Test("送る値の端: 版が空なら / を付けない・kit は 16 文字で切り空なら省く・forMainBundle の版")
+    func headerValueEdges() {
+        typealias ID = StackNestViewerIdentification
+        #expect(ID(bundleIdentifier: "a.b", version: "", format: 1, kitVersion: nil).headerValue == "a.b; format=1")
+        #expect(ID(bundleIdentifier: "a.b", version: nil, format: 1, kitVersion: nil).headerValue == "a.b; format=1")
+        #expect(ID(bundleIdentifier: "a.b", version: "1", format: 1, kitVersion: "").headerValue == "a.b/1; format=1")
+        #expect(ID(bundleIdentifier: "a.b", version: "1", format: 1, kitVersion: String(repeating: "k", count: 40))
+                    .headerValue == "a.b/1; format=1; kit=" + String(repeating: "k", count: 16))
+        #expect(ID.parse("a.b/ ; format=1")?.version == nil, "/ の後が空なら版なし")
+        #expect(ID.forMainBundle(format: 1).version
+                == Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+    }
+
     @Test("保存の形: 印字できる ASCII だけ・前後の空白を落とす・200 文字")
     func sanitizeForStorage() {
         typealias ID = StackNestViewerIdentification
