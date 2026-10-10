@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+.DS_Store
+__pycache__/
+*.pyc
+xcuserdata/
+DerivedData/
+# 本物の参照ファイル（実在の本の題名と鍵を持つ）と、偽の StackNest の記録を取り込まない。文書のサンプルだけは追跡する。
+*.stacknestbook
+!Documentation/Samples/*.stacknestbook
+records.json
