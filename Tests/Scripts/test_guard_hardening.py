@@ -193,6 +193,15 @@ class GhGuardedTests(Base):
         body.write_text(f"see {PHASE}\n")
         self.assertEqual(self.post("issue", "create", "--title", "T", "--body-file", str(body)).returncode, 1)
 
+    def test_bare_dash_stdin_body_is_checked(self):
+        refused = self.script("gh-guarded.sh", "gist", "create", "-", stdin=f"see {PHASE}\n")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("internal marker", refused.stderr)
+        self.assertEqual(self.gh.calls(), "")
+        clean = self.script("gh-guarded.sh", "gist", "create", "-", stdin="plain words\n")
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        self.assertIn("gist create", self.gh.calls())
+
 
 class TagAndTrailerTests(Base):
     def setUp(self):

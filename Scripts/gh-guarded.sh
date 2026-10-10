@@ -21,6 +21,7 @@ fi
 #     gh api の -F / --field の「キー=@パス」の値（-f / --raw-field の値はそのままの文字列なので読まない）。通常のファイルならそのまま読み、"-"（標準入力）や
 #     パイプ（<(...)）などは一度一時ファイルに受けてから検査し、gh にはその一時ファイルを渡す。
 #     読めない指定は止める（検査を素通りさせない）
+#   - 位置引数の "-"（gist create - など、標準入力の本文）も、上と同じく一時ファイルに受けて検査する
 #   - それ以外で既存の通常のファイルを指す引数（gist のファイルなど）
 # gh api の -F は「キー=値」の指定で、本文のファイル名ではない（値が @パスのときだけファイル）。
 if [ "$#" -eq 0 ]; then exec gh; fi
@@ -86,6 +87,8 @@ for a in "$@"; do
       expand_field "$a"; a="$FIELD" ;;
     *)
       case "$a" in
+        -)                                         # 位置引数の "-"（標準入力の本文）: 他の標準入力の指定と同じく検査する
+          resolve_input -; a="$INPUT" ;;
         --body-file|--notes-file|--input) expect=input ;;
         -F) if [ "$SUB" = "api" ]; then expect=field; else expect=input; fi ;;
         --field) expect=field ;;

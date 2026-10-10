@@ -33,15 +33,18 @@ report() {
 }
 
 check_range() {
-    local log
+    local log hits
     log="$(git log --format='@@commit@@ %h%n%B' "$@")" || fail "git log failed: $*"
-    report "$(printf '%s\n' "$log" | scan "?")"
+    # A failed scan must not read as "nothing found": capture the output so the exit status counts.
+    hits="$(printf '%s\n' "$log" | scan "?")" || fail "scan failed (awk): $*"
+    report "$hits"
 }
 
 case "${1:-}" in
 message)
     [ -n "${2:-}" ] && [ -r "$2" ] || fail "usage: $0 message <file>"
-    report "$(scan message < "$2")"
+    hits="$(scan message < "$2")" || fail "scan failed (awk): $2"
+    report "$hits"
     ;;
 pre-push)
     # 省略可の第 2 引数: push 先の remote の名前（pre-push フックの $1）。新しい ref では、その remote の追跡 ref に無い

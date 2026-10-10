@@ -2,6 +2,7 @@
 止めることを確かめる）。"""
 
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -85,6 +86,25 @@ class CommitTrailerTests(unittest.TestCase):
         allowed = self.git("commit", "-q", "-m", "Hooked", "-m", "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
                            check=False)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
+
+    def test_a_failed_scan_fails_closed(self):
+        # A scan (awk) that aborts must not read as "nothing found", in either mode.
+        fake = self.repo / "fakebin"
+        fake.mkdir()
+        awk = fake / "awk"
+        awk.write_text("#!/bin/sh\nexit 2\n")
+        awk.chmod(0o755)
+        env = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}")
+        run = lambda *args: subprocess.run([str(SCRIPTS / "check-commit-trailers.sh"), *args], cwd=self.repo,
+                                           capture_output=True, text=True, env=env)
+        message = self.repo / "message.txt"
+        message.write_text("Clean\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n")
+        for result in (run("range", "HEAD"), run("message", str(message))):
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("scan failed", result.stderr)
+        # Control: without the broken awk the same input passes.
+        self.assertEqual(self.run_script("range", "HEAD").returncode, 0)
+        self.assertEqual(self.run_script("message", str(message)).returncode, 0)
 
     def test_pre_push_checks_new_commits_only(self):
         base = self.git("rev-parse", "HEAD").stdout.strip()

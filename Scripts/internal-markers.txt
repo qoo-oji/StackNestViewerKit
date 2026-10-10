@@ -11,3 +11,4 @@ decisions[.]md
 qooviewer[-]fork
 phase[-]g[0-9]
 claude[.]ai/code/session[_]
+Task [0-9]

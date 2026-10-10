@@ -41,6 +41,7 @@ public enum StackNestFixtures {
     /// pages page 255 can't be told from the cover (255) and page 256 not from page 0. Large images (such as
     /// 1600×2400) take several seconds in debug builds.
     public static func pngPage(width: Int = 4, height: Int = 6, marker: Int = 0) -> Data {
+        precondition(width > 0 && height > 0, "pngPage needs a positive width and height (got \(width)x\(height))")
         let rows = (0..<height).map { _ -> [UInt8] in
             [0] + (0..<width).map { _ in UInt8(truncatingIfNeeded: marker) }
         }
