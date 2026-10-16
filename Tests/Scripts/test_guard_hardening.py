@@ -241,6 +241,17 @@ class TagAndTrailerTests(Base):
         result = self.run_hook(self.tag_line("v3", "Release zzcanaryzz"))
         self.assertNotEqual(result.returncode, 0)
 
+    def test_unreadable_object_type_refuses_the_push(self):
+        # A failing `git cat-file -t` must not read as "not a tag" (the tag message would go unchecked).
+        line = self.tag_line("v5", "Release zzcanaryzz")
+        real_git = shutil.which("git")
+        stub = Path(self.env["PATH"].split(":")[0]) / "git"
+        stub.write_text(f'#!/bin/sh\n[ "$1" = cat-file ] && [ "$2" = -t ] && exit 128\nexec {real_git} "$@"\n')
+        stub.chmod(0o755)
+        result = self.run_hook(line)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read the object", result.stderr)
+
     def test_clean_annotated_tag_and_lightweight_tag_pass(self):
         self.assertEqual(self.run_hook(self.tag_line("v4", "Release 0.1.0")).returncode, 0)
         self.git("tag", "light")

@@ -29,7 +29,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
   "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
   obj="$local_sha"
-  while [ "$(git cat-file -t "$obj" 2>/dev/null || true)" = "tag" ]; do
+  while :; do
+    objtype="$(git cat-file -t "$obj")" || { echo "pre-push: cannot read the object $obj of $remote_ref. Push refused." >&2; exit 1; }   # 失敗を「タグではない」と取り違えない
+    [ "$objtype" = "tag" ] || break
     git cat-file tag "$obj" > "$TAGTEXT" || { echo "pre-push: cannot read the tag object of $remote_ref. Push refused." >&2; exit 1; }
     "$ROOT/Scripts/check-commit-trailers.sh" message "$TAGTEXT" || { echo "pre-push: tag $remote_ref refused." >&2; exit 1; }
     "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: tag $remote_ref refused." >&2; exit 1; }
