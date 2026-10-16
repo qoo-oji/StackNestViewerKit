@@ -197,6 +197,17 @@ class GhGuardedTests(Base):
         body.write_text(f"see {PHASE}\n")
         self.assertEqual(self.post("issue", "create", "--title", "T", "--body-file", str(body)).returncode, 1)
 
+    def test_unchecked_stdin_never_reaches_gh(self):
+        # No bare "-": gh must not be able to read the caller's stdin (real gh reads it for `gist create`).
+        result = self.script("gh-guarded.sh", "gist", "create", stdin=f"{'zzcanaryzz'}\n")
+        self.assertEqual(self.gh.stdin(), "", self.gh.stdin())
+        body = self.root / "body.txt"
+        body.write_text("plain words\n")
+        result = self.script("gh-guarded.sh", "issue", "create", "--title", "T", "--body-file", str(body),
+                             stdin="zzcanaryzz\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.gh.stdin(), "")
+
     def test_bare_dash_stdin_body_is_checked(self):
         refused = self.script("gh-guarded.sh", "gist", "create", "-", stdin=f"see {PHASE}\n")
         self.assertEqual(refused.returncode, 1)
@@ -291,6 +302,26 @@ class TagAndTrailerTests(Base):
         for name in ["refs/heads/feature/viewer-kit-0.1", "refs/tags/0.1.0"]:
             with self.subTest(name=name):
                 self.assertEqual(self.run_hook(f"refs/heads/main {head} {name} {zero}\n").returncode, 0)
+
+    def test_anchored_pattern_matches_the_name_without_the_refs_prefix(self):
+        self.identifiers.write_text("^zzbranchzz\n")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        for name in ["refs/heads/zzbranchzz", "refs/tags/zzbranchzz"]:
+            with self.subTest(name=name):
+                result = self.run_hook(f"refs/heads/main {head} {name} {'0' * 40}\n")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("ref name", result.stderr)
+        self.assertEqual(self.run_hook(f"refs/heads/main {head} refs/heads/other {'0' * 40}\n").returncode, 0)
+
+    def test_unreadable_stdin_refuses_the_push(self):
+        folder = os.open(str(self.root), os.O_RDONLY)          # reading a directory fails
+        try:
+            result = subprocess.run([str(self.repo / "Scripts" / "githooks" / "pre-push"), "origin", "x"],
+                                    cwd=self.repo, stdin=folder, capture_output=True, text=True, env=self.env)
+        finally:
+            os.close(folder)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot read", result.stderr)
 
     def test_deleting_a_ref_needs_no_name_check(self):
         result = self.run_hook(f"(delete) {'0' * 40} refs/heads/{PHASE_BRANCH} {self.git('rev-parse', 'HEAD').stdout.strip()}\n")

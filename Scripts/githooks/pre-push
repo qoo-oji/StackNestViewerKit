@@ -11,7 +11,7 @@ if [ "$ACTUAL" != "$EXPECTED" ]; then
 fi
 ROOT="$(git rev-parse --show-toplevel)"
 # 標準入力（ref の組）は 1 度しか読めないので、受けてから 3 つの検査に渡す。
-REFS="$(cat)"
+REFS="$(cat)" || { echo "pre-push: cannot read the refs from stdin. Push refused." >&2; exit 1; }   # 読めなかったのを「push する ref なし」と取り違えない
 [ -n "$REFS" ] || exit 0
 # 公開のコミットに Claude-Session: の行を残さない（このリポジトリの決まり。CONTRIBUTING.md）。
 printf '%s\n' "$REFS" | "$ROOT/Scripts/check-commit-trailers.sh" pre-push "$REMOTE" || exit 1
@@ -25,7 +25,8 @@ trap 'rm -f "$TAGTEXT"' EXIT
 ZERO="0000000000000000000000000000000000000000"
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$ZERO" ] && continue
-  printf '%s\n' "$remote_ref" > "$TAGTEXT"
+  # 名前は refs/heads/ などを付けたものと外したものの両方を見る（^ で固定した検査語がブランチ名・タグ名に当たるように）
+  printf '%s\n%s\n' "$remote_ref" "${remote_ref#refs/*/}" > "$TAGTEXT"
   "$ROOT/Scripts/check-internal-markers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
   "$ROOT/Scripts/check-private-identifiers.sh" text "$TAGTEXT" || { echo "pre-push: ref name $remote_ref refused." >&2; exit 1; }
   obj="$local_sha"
