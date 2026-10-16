@@ -17,6 +17,11 @@
 # 見つかったら該当箇所を出して終了コード 1。見つからなければ 0。
 set -euo pipefail
 
+# 検査はすべて C ロケールで動かす。UTF-8 のロケールだと、UTF-8 として読めないバイトの行で macOS の awk が
+# 途中で止まり（終了コード 0 のことがある）、それより後の行を見ないまま「一致なし」になる。C ロケールならバイトの
+# まま読む。awk と grep の失敗は「一致なし」と区別して止める（下の fail）
+export LC_ALL=C
+
 LIST="${STACKNEST_PRIVATE_IDENTIFIERS_FILE:-$HOME/.config/stacknest/private-identifiers}"
 ZERO="0000000000000000000000000000000000000000"
 
@@ -45,15 +50,17 @@ check_tree() {
 # 消した行は見ない — 見ると、識別子を消すコミットそのものが止まる）。マージのコミットは第 1 親との
 # 差分として見る（衝突の解消の中で入った行も拾う）
 check_patches() {
-    local patch hits rc=0
+    local patch added hits rc=0
     patch="$(git log -p --diff-merges=first-parent --no-color --no-ext-diff --format='commit %h' "$@")" \
         || fail "git log -p failed: $*"
     # 足された行だけを、行頭の "+" を外して照合する（^ や $ で固定した検査語も当たるように）。
     # 見出しの "+++ b/…" と、"++ " で始まる足した行（パッチでは "+++ " になる）を取り違えないよう、
     # "@@" の区切りの中だけを見る
-    hits="$(printf '%s\n' "$patch" \
-        | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}' \
-        | grep -i -E -f "$PATTERNS")" || rc=$?
+    # awk と grep を 1 本のパイプにすると、awk の失敗が grep の「一致なし(1)」に隠れるので、段を分けて状態を見る
+    added="$(printf '%s\n' "$patch" \
+        | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}')" \
+        || fail "awk failed on the outgoing patches"
+    hits="$(printf '%s\n' "$added" | grep -i -E -f "$PATTERNS")" || rc=$?
     [ "$rc" -le 1 ] || fail "grep failed on the added lines (exit $rc)"   # 一致なし(1)と取り違えない
     if [ -n "$hits" ]; then
         echo "$hits" >&2

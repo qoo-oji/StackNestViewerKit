@@ -11,6 +11,10 @@
 # 見つかったら該当箇所を出して終了コード 1。見つからなければ 0。
 set -euo pipefail
 
+# 検査はすべて C ロケールで動かす。UTF-8 のロケールだと、UTF-8 として読めないバイトの行で macOS の awk が
+# 途中で止まり（終了コード 0 のことがある）、それより後の行を見ないまま「一致なし」になる。
+export LC_ALL=C
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LIST="$ROOT/Scripts/internal-markers.txt"
 ZERO="0000000000000000000000000000000000000000"
@@ -36,12 +40,14 @@ check_tree() {
 }
 
 check_patches() {
-    local patch hits rc=0
+    local patch added hits rc=0
     patch="$(git -C "$ROOT" log -p --diff-merges=first-parent --no-color --no-ext-diff --format='commit %h' "$@")" \
         || fail "git log -p failed: $*"
-    hits="$(printf '%s\n' "$patch" \
-        | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}' \
-        | grep -E -f "$PATTERNS")" || rc=$?
+    # awk と grep を 1 本のパイプにすると awk の失敗が grep の「一致なし(1)」に隠れるので、段を分ける
+    added="$(printf '%s\n' "$patch" \
+        | awk '/^diff --git /{h=0; next} /^@@/{h=1; next} h && /^\+/{print substr($0, 2)}')" \
+        || fail "awk failed on the outgoing patches"
+    hits="$(printf '%s\n' "$added" | grep -E -f "$PATTERNS")" || rc=$?
     [ "$rc" -le 1 ] || fail "grep failed on the added lines (exit $rc)"   # 一致なし(1)と取り違えない
     if [ -n "$hits" ]; then
         echo "$hits" >&2
