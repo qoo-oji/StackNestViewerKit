@@ -538,6 +538,7 @@ struct StackNestBlockingFlushTests {
         let progress = reporter(sent, registry)
         progress.note(page: 4)
         let done = Completions()
+        let fires = Completions()
         let spin = Duration.milliseconds(200)
         let (completedDuringSpin, spun) = await inMainQueueJob { () -> (Int, Duration) in
             registry.flushAll(timeout: .milliseconds(30)) { done.count += 1 }
@@ -545,7 +546,7 @@ struct StackNestBlockingFlushTests {
             // 入力源もタイマーも無い run loop は `run(until:)` がすぐ戻り、回ったことにならないので、何もしない
             // タイマーを付けて期限まで回し続ける。メインキューは入れ子では回らない。
             // メインスレッドを止めている間はほかの suite の @MainActor の試験も待たされるので、回す時間は短く保つ。
-            let keepAlive = Timer(timeInterval: 0.01, repeats: true) { _ in }
+            let keepAlive = Timer(timeInterval: 0.01, repeats: true) { _ in fires.count += 1 }
             RunLoop.current.add(keepAlive, forMode: .default)
             defer { keepAlive.invalidate() }
             let start = ContinuousClock.now
@@ -554,8 +555,9 @@ struct StackNestBlockingFlushTests {
             }
             return (done.count, ContinuousClock.now - start)
         }
-        // 実際に上限を超えて回った上で、completion も上限も来なかったこと。
-        #expect(spun >= spin, "run loop が期限まで回っていない")
+        // 実際に上限を超えて run loop が回った（タイマーが発火した）上で、completion も上限も来なかったこと。
+        #expect(spun >= spin)
+        #expect(fires.count >= 1, "run loop が回っていない（タイマーが一度も発火していない）")
         #expect(completedDuringSpin == 0, "メインキューの仕事の中で completion が呼ばれた")
         // 仕事を抜ければ進む（送信の終わりは waitUntilIdle で待ってから確かめる）。
         let deadline = ContinuousClock.now + .seconds(10)
