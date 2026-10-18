@@ -171,8 +171,9 @@ struct StackNestProgressReporterTests {
         #expect(sent.attemptCount == 2)
     }
 
-    /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔を返す
-    /// （眠りが粗い機でも、間隔がまとめ待ちより短いことを試験の前提として確かめる）。
+    /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔（最後の合図から
+    /// 戻るまでも含む）を返す。混んだ CI の機では 25 ms の眠りが 0.7 秒ほどに延びることがあるので、試験は
+    /// まとめ待ちをこの間隔より十分に長く取り、間隔がまとめ待ちより短いことを前提として確かめる。
     private func turnPages(_ progress: StackNestProgressReporter, for span: Duration) async -> (last: Int, longestGap: Duration) {
         let start = ContinuousClock.now
         var previous = start
@@ -186,26 +187,43 @@ struct StackNestProgressReporterTests {
             progress.note(page: page)
             try? await Task.sleep(for: .milliseconds(25))
         }
+        // 最後の合図から、呼び出し側が「まだ送っていない」を確かめるまでの間も、まとめ待ちが発火しうる間に入る。
+        longestGap = max(longestGap, ContinuousClock.now - previous)
         return (page, longestGap)
     }
 
+    /// 前提が崩れたときの言葉（コードの誤りではなく、機が遅すぎて試験が成り立たなかったことを示す）。
+    private func tooSlow(_ longestGap: Duration, _ debounce: Duration) -> Comment {
+        let text = "前提: 合図の間隔（最長 \(longestGap)）がまとめ待ち（\(debounce)）より短い。満たさないのは機が遅すぎる"
+            + "ためで、コードの誤りではない (runner too slow: a 25 ms sleep stalled past the debounce; not a code defect)"
+        return Comment(rawValue: text)
+    }
+
     @Test("ページを送るたびに、まとめ待ちをやり直す")
-    func debounceRestartsOnEveryNote() async {
+    func debounceRestartsOnEveryNote() async throws {
+        // まとめ待ちより長く送り続ける（やり直さなければ、送り続けている間に最初のまとめ待ちが発火する）。
+        // まとめ待ちは 1.5 秒: 合図の間隔（ふつう 25 ms）が 1.5 秒を超えない限り前提は崩れない。
+        // 送り続けるのはそれより 0.5 秒長い 2 秒、送り終えてからのまとめ待ちを足して 3.5 秒ほど。
+        let debounce = Duration.milliseconds(1500)
         let sent = ScriptedSend()
-        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .seconds(60))
-        let (last, longestGap) = await turnPages(progress, for: .seconds(1))
-        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
+        let progress = reporter(sent, debounce: debounce, maxWait: .seconds(60))
+        let (last, longestGap) = await turnPages(progress, for: .seconds(2))
+        try #require(longestGap < debounce, tooSlow(longestGap, debounce))
         #expect(sent.attemptCount == 0)
         await progress.waitUntilIdle()
         #expect(sent.pages == [last])
     }
 
     @Test("続けてページを送り続けても、まとめ待ちの最長で送る")
-    func maxWaitSendsWhileKeepingTurningPages() async {
+    func maxWaitSendsWhileKeepingTurningPages() async throws {
+        // まとめ待ちは 3 秒と長く、最長の待ちは 200 ms と短くする。送り続ける 1 秒の間に送るのは最長の待ちだけで、
+        // 合図の間隔が 3 秒を超えない限り、まとめ待ちの発火と取り違えない。最長の待ちで送るたびに次の待ちも
+        // 200 ms で区切られるので、送り終えてからの待ちも短い（全体で 1 秒あまり）。
+        let debounce = Duration.seconds(3)
         let sent = ScriptedSend()
-        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .milliseconds(200))
+        let progress = reporter(sent, debounce: debounce, maxWait: .milliseconds(200))
         let (last, longestGap) = await turnPages(progress, for: .seconds(1))
-        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
+        try #require(longestGap < debounce, tooSlow(longestGap, debounce))
         #expect(sent.attemptCount >= 1)
         await progress.waitUntilIdle()
         #expect(sent.pages.last == last)
