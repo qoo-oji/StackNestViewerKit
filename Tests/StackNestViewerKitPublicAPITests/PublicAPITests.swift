@@ -79,6 +79,20 @@ struct PublicAPITests {
         #expect(StackNestViewerSupport.verify(infoDictionary: info).isEmpty)
     }
 
+    @Test("ホストの試験は自分の登録簿を作って役を載せられる（共有の登録簿を使わない）")
+    func reporterWithAnOwnRegistry() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        let registry = StackNestProgressRegistry()
+        let reporter = StackNestProgressReporter(session: session, startPage: 0, registry: registry) { _ in }
+        reporter.note(page: 2)
+        #expect(registry.hasUnsentWork)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            registry.flushAll(timeout: .seconds(5)) { continuation.resume() }
+        }
+        #expect(stub.requests.last?.progressPage == 2)
+    }
+
     @Test("終了時の送り切り（共有の登録簿）")
     func quitFlushThroughTheSharedRegistry() async throws {
         let stub = StackNestStubServer(pageCount: 3)

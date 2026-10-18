@@ -312,6 +312,29 @@ struct StackNestProgressReporterTests {
         #expect(!registry.hasUnsentWork)
     }
 
+    @Test("Registry: 登録簿を渡して作った役は、その登録簿にだけ載り、shared には載らない（送り切りもその登録簿で）")
+    func reporterWithItsOwnRegistryStaysOutOfShared() async throws {
+        let stub = StackNestStubServer(pageCount: 5)
+        let session = try makeSession(stub)
+        let registry = StackNestProgressRegistry()
+        var timing = StackNestProgressReporter.Timing()
+        timing.debounce = .seconds(60)
+        timing.maxWait = .seconds(60)
+        let progress = StackNestProgressReporter(session: session, startPage: 0, timing: timing, registry: registry) { _ in }
+        let custom = StackNestProgressReporter(startPage: nil, registry: registry, send: { _ in }, onFailure: { _ in })
+        for reporter in [progress, custom] {
+            #expect(registry.containsForTesting(reporter))
+            #expect(!StackNestProgressRegistry.shared.containsForTesting(reporter))
+        }
+        progress.note(page: 3)
+        #expect(registry.hasUnsentWork)
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            registry.flushAll(timeout: .seconds(5)) { continuation.resume() }
+        }
+        #expect(stub.requests.map(\.progressPage) == [3])
+        #expect(!registry.hasUnsentWork)
+    }
+
     @Test("セッションへ書き戻す（鍵と名乗り付きの POST）。閉じたセッションでも送り、送り切ったら解放される")
     func sessionIsReleasedAfterCloseAndReporterIdle() async throws {
         let stub = StackNestStubServer()

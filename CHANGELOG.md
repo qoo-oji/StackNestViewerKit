@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 追加 / Added
+
+- `StackNestProgressRegistry` の公開の `init()` と、登録簿を渡せる `StackNestProgressReporter` の `init(session:startPage:timing:registry:onFailure:)`・`init(startPage:timing:registry:send:onFailure:)`。ホストの試験が、役をプロセスで 1 つの `StackNestProgressRegistry.shared` に載せずに済む。`registry:` を取らない形はこれまでどおり `shared` に載せる。
+  A public `StackNestProgressRegistry.init()` and `StackNestProgressReporter` initializers that take a registry (`init(session:startPage:timing:registry:onFailure:)` and `init(startPage:timing:registry:send:onFailure:)`), so host tests can keep their reporters out of the process-wide `StackNestProgressRegistry.shared`. The initializers without `registry:` still use `shared`.
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

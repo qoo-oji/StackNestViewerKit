@@ -49,6 +49,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 ```
 
+## 試験と登録簿 / Tests and Registries
+
+役を作る形のうち `registry:` を取らないものは、``StackNestProgressRegistry/shared`` に役を載せる。ホストの試験は、
+自分の登録簿（``StackNestProgressRegistry/init()``）を作って渡すと、プロセスで 1 つの登録簿に役を残さない（残すと、
+同じプロセスのアプリの終了の処理がその役の送り切りを待つ）。
+
+The initializers without `registry:` put the reporter in ``StackNestProgressRegistry/shared``. Host tests can pass
+a registry of their own (``StackNestProgressRegistry/init()``) so their reporters don't stay in the process-wide one
+(where the app's quit handler in the same process would wait to flush them).
+
+```swift
+import StackNestViewerKit
+
+@MainActor
+func makeTestReporter(session: StackNestBookSession) -> (StackNestProgressReporter, StackNestProgressRegistry) {
+    let registry = StackNestProgressRegistry()
+    let reporter = StackNestProgressReporter(session: session, startPage: 0, registry: registry) { _ in }
+    return (reporter, registry)
+}
+```
+
 記録を残さない窓（シークレットウインドウなど）で書き戻すかは、ホストが役を作るかどうかで決める。
 
 Whether a private window writes progress back is the host's choice: don't create a reporter for it.
