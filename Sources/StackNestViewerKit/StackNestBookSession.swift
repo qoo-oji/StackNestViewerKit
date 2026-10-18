@@ -53,6 +53,24 @@ public final class StackNestBookSession: @unchecked Sendable {
         public var pageCacheBytes = 64 << 20
         /// 先読みの同時の数。 / How many prefetches run at once.
         public var maxConcurrentPrefetches = 2
+        /// 同時に出す要求の上限（1 未満は 1）。超えた分はセッションの中の列で待ち、枠が空くと書き戻し → 表示の要求が
+        /// 乗っている件 → 先読みだけの件の順に出す（同じ組の中は件を作った順。先読みの件に表示の要求が乗れば、その場で前へ
+        /// 出る）。待つ人が誰もいなくなった件は、要求を出さずに列から外す。`URLSession` の宛先ごとの接続の数
+        /// （`httpMaximumConnectionsPerHost`。`makeURLSessionConfiguration` が何を返しても）もこの値にするので、
+        /// 出した要求が `URLSession` の中で待たされることはない。列で待つ間も `waitLimit` は進む。
+        /// `maxConcurrentPrefetches` より大きく保つ（差の分が表示の要求に残る）。走っている先読みは追い越せないので、
+        /// 同じか小さいと、表示の要求が先読みの終わりを待つことがある。
+        ///
+        /// The most requests in flight at once (values below 1 count as 1). The rest wait in the session's own
+        /// queue and start, as slots free up, in this order: progress write-backs, then fetches a display request
+        /// is waiting for, then prefetch-only fetches (within each group, in the order the fetches were created; a prefetch that a
+        /// display request joins moves ahead at once). A queued fetch whose waiters all leave is dropped without a
+        /// request. `httpMaximumConnectionsPerHost` is set to the same value (whatever `makeURLSessionConfiguration`
+        /// returns), so no request waits inside `URLSession`. `waitLimit` keeps running while a request is queued.
+        /// Keep it larger than `maxConcurrentPrefetches`: the difference is what stays free for display requests.
+        /// A running prefetch can't be overtaken, so with an equal or smaller value a display request may wait for
+        /// prefetches to finish.
+        public var maxConcurrentRequests = 6
         /// つないでよいホスト（既定は loopback だけ）。 / Hosts the session may connect to (loopback only by default).
         public var allowedHosts: StackNestHostPolicy = .loopbackOnly
         /// `book` のパスの形を問わないか。既定（false）では、StackNest が書く形（`/api/v1/libraries/<library>/books/<id>`
@@ -72,10 +90,12 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// The identification (nil means `Bundle.main`; `format=` is always the reference file's version).
         public var identification: StackNestViewerIdentification? = nil
         /// `URLSession` の設定を作る口（試験の見立てを差し込む）。キャッシュ・クッキー・資格情報の保管は、ここで
-        /// 何を返しても外す。
+        /// 何を返しても外す。宛先ごとの接続の数（`httpMaximumConnectionsPerHost`）も、何を返しても
+        /// `maxConcurrentRequests` に合わせる。
         ///
         /// Makes the `URLSessionConfiguration` (tests inject stubs here). Caches, cookies and credential
-        /// storage are always removed from whatever it returns.
+        /// storage are always removed from whatever it returns, and `httpMaximumConnectionsPerHost` is always set
+        /// to `maxConcurrentRequests`.
         public var makeURLSessionConfiguration: @Sendable () -> URLSessionConfiguration = { .ephemeral }
         /// 期限の確認に使う時計。 / The clock used for expiry checks.
         public var now: @Sendable () -> Date = { Date() }
@@ -110,7 +130,8 @@ public final class StackNestBookSession: @unchecked Sendable {
         let delegate = SessionDelegate()
         self.delegate = delegate
         urlSession = URLSession(
-            configuration: Self.hardened(configuration.makeURLSessionConfiguration(), waitLimit: configuration.waitLimit),
+            configuration: Self.hardened(configuration.makeURLSessionConfiguration(), waitLimit: configuration.waitLimit,
+                                         maxConcurrentRequests: configuration.maxConcurrentRequests),
             delegate: delegate, delegateQueue: nil)
         state = EngineState(
             cache: PageCache(capacity: configuration.pageCacheCount, byteBudget: configuration.pageCacheBytes),
@@ -228,7 +249,7 @@ public final class StackNestBookSession: @unchecked Sendable {
             state.prefetchQueue = wanted.filter {
                 state.prefetchTickets[$0] == nil && state.flights[$0] == nil && !state.cache.contains($0)
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
     }
@@ -249,6 +270,8 @@ public final class StackNestBookSession: @unchecked Sendable {
             state.manifest = nil
             state.prefetchQueue.removeAll()
             state.prefetchTickets.removeAll()
+            // 並んでいる書き戻しは残す（閉じた後も送る）。出している件の枠は、取り消した要求が終わったときに返る。
+            state.queuedFlights.removeAll { !$0.key.isProgress }
             for (key, flight) in state.flights where !key.isProgress {
                 state.flights[key] = nil
                 flight.isAbandoned = true
@@ -328,18 +351,19 @@ public final class StackNestBookSession: @unchecked Sendable {
 
     // MARK: - 顔に共通の部分
 
-    /// 読んだ manifest を記録する。より古い件の応答は、呼んだ人には返すが状態には反映しない（通し番号で判定）。
-    /// ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
+    /// 読んだ manifest を記録する。より前に出した件の応答は、呼んだ人には返すが状態には反映しない（出した順の
+    /// 番号で判定）。ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
     /// 先読みだけが待っている範囲の外の件は取り消す（以後、範囲の外へは要求を出さない）。
     func recordManifest(_ response: FetchedResponse) throws -> StackNestBookManifest {
         let manifest = try StackNestBookManifest.parse(response.data)
         let now = configuration.now()
         var effects = Effects()
         lock.withLock {
-            // A response from an older flight than the one already applied is returned to its caller
-            // but never overwrites the newer state (serials increase with every flight).
-            guard response.serial > state.manifestSerial else { return }
-            state.manifestSerial = response.serial
+            // A response from a flight launched before the one already applied is returned to its caller
+            // but never overwrites the newer state (launch numbers increase with every launched flight; the
+            // creation serial would not do, since queued flights can launch out of creation order).
+            guard response.launchNumber > state.manifestLaunchNumber else { return }
+            state.manifestLaunchNumber = response.launchNumber
             if !state.isClosed { state.manifest = manifest }
             state.knownPageCount = manifest.pageCount
             state.hasConfirmedPageCount = true
@@ -352,7 +376,7 @@ public final class StackNestBookSession: @unchecked Sendable {
             for (key, ticket) in state.prefetchTickets where beyond(key) {
                 _ = removeWaiterLocked(ticket, effects: &effects)
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
         return manifest
@@ -389,8 +413,11 @@ public final class StackNestBookSession: @unchecked Sendable {
     }
 
     /// キャッシュ・クッキー・資格情報の保管を持たない設定にする（鍵の付いた要求の結果をディスクへ残さない）。
-    /// 1 回の要求の全体の時間（`timeoutIntervalForResource`）を `waitLimit`＋上乗せで絞る。
-    static func hardened(_ host: URLSessionConfiguration, waitLimit: Duration) -> URLSessionConfiguration {
+    /// 1 回の要求の全体の時間（`timeoutIntervalForResource`）を `waitLimit`＋上乗せで絞る。宛先ごとの接続の数は
+    /// セッションの同時の数の上限に合わせる（それより多くは出さないので、`URLSession` の中の列を使わない）。
+    static func hardened(_ host: URLSessionConfiguration, waitLimit: Duration,
+                         maxConcurrentRequests: Int) -> URLSessionConfiguration
+    {
         // Work on a copy: the host's object (possibly shared) stays untouched.
         let configuration = (host.copy() as? URLSessionConfiguration) ?? host
         configuration.urlCache = nil
@@ -403,6 +430,7 @@ public final class StackNestBookSession: @unchecked Sendable {
         // Never use a proxy: an empty dictionary disables system and PAC proxies, so the token goes only to the book origin.
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForResource = (waitLimit + resourceTimeoutMargin).timeInterval
+        configuration.httpMaximumConnectionsPerHost = max(maxConcurrentRequests, 1)
         return configuration
     }
 }

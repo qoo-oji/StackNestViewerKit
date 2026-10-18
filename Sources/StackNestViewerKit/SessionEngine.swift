@@ -1,6 +1,7 @@
 import Foundation
 
-/// セッションのエンジン（1 本の道）。ロックの中では帳簿だけを付け、再開・取り消し・要求の開始はロックの外で行う。
+/// セッションのエンジン（1 本の道）。ロックの中では帳簿だけを付け、待つ人の再開・取り消し・要求の組み立てはロックの外で
+/// 行う（出す要求の `resume()` だけは、表へ載せるのと同じロックの中で行う。`launch` を参照）。
 extension StackNestBookSession {
     // MARK: - 札
 
@@ -33,7 +34,7 @@ extension StackNestBookSession {
             }
             admitLocked(key, priority: priority, ticket: ticket, waiter: waiter, now: now, effects: &effects)
             // 表示の要求が先読みの件に乗ると、その件は先読みの枠を使わなくなる（次の先読みを始められる）。
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
     }
@@ -59,7 +60,8 @@ extension StackNestBookSession {
             state.nextSerial += 1
             flight = Flight(key: key, serial: state.nextSerial)
             state.flights[key] = flight
-            effects.launches.append(flight)
+            // すぐには出さず列に並べる（出すのは `startQueuedFlightsLocked`。枠が空いていれば同じ周で出る）。
+            state.queuedFlights.append(flight)
         }
         flight.waiters[ticket] = WaiterEntry(waiter: waiter, priority: priority)
         state.tickets[ticket] = .registered(key)
@@ -95,6 +97,13 @@ extension StackNestBookSession {
         state.flights.values.filter(\.countsAsPrefetch).count
     }
 
+    /// 帳簿が変わった後に必ず呼ぶ: 先読みの枠が空いていれば先読みの件を作り、同時の数の枠が空いていれば
+    /// 並んでいる件を出す。
+    func advanceLocked(now: Date, effects: inout Effects) {
+        startQueuedPrefetchesLocked(now: now, effects: &effects)
+        startQueuedFlightsLocked(effects: &effects)
+    }
+
     /// 枠が空いていれば、指示の順に先読みを始める。
     func startQueuedPrefetchesLocked(now: Date, effects: inout Effects) {
         let limit = max(configuration.maxConcurrentPrefetches, 0)
@@ -107,6 +116,29 @@ extension StackNestBookSession {
             if state.flights[key] != nil || state.cache.contains(key) { continue }
             let ticket = allocateTicketLocked()
             admitLocked(key, priority: .prefetch, ticket: ticket, waiter: .prefetch, now: now, effects: &effects)
+        }
+    }
+
+    // MARK: - 同時の数
+
+    /// 同時に出す要求の上限（1 未満は 1）。
+    var requestLimit: Int { max(configuration.maxConcurrentRequests, 1) }
+
+    /// 同時の数の枠が空いている分だけ、並んでいる件を出す。出す順は `admissionRank`（書き戻し → 表示 → 先読み）、
+    /// 同じ組の中は作った順。`URLSession` の宛先ごとの接続の数（`httpMaximumConnectionsPerHost`）も同じ値にして
+    /// あるので、出した要求が `URLSession` の中で待たされることはない（そこで待つと、優先度は目安にしかならず、
+    /// 表示の要求が先読みの後ろで時間切れになりうる。待つ人の時計も資源の時間切れも、その間に進む）。
+    func startQueuedFlightsLocked(effects: inout Effects) {
+        state.queuedFlights.removeAll(where: \.isAbandoned)
+        while state.runningSerials.count < requestLimit, !state.queuedFlights.isEmpty {
+            var best = 0
+            for index in state.queuedFlights.indices.dropFirst()
+            where state.queuedFlights[index].admissionRank < state.queuedFlights[best].admissionRank {
+                best = index
+            }
+            let flight = state.queuedFlights.remove(at: best)
+            state.runningSerials.insert(flight.serial)
+            effects.launches.append(flight)
         }
     }
 
@@ -126,7 +158,7 @@ extension StackNestBookSession {
                 return nil
             case .registered?:
                 let removed = removeWaiterLocked(ticket, effects: &effects)
-                startQueuedPrefetchesLocked(now: now, effects: &effects)
+                advanceLocked(now: now, effects: &effects)
                 return removed
             }
         }
@@ -146,6 +178,8 @@ extension StackNestBookSession {
         if flight.waiters.isEmpty {
             flight.isAbandoned = true
             state.flights[key] = nil
+            // まだ出していない件は、要求を出さずに列から外す。
+            state.queuedFlights.removeAll { $0 === flight }
             if let task = flight.task { effects.cancels.append(task) }
         } else {
             flight.task?.priority = flight.desiredPriority
@@ -155,8 +189,15 @@ extension StackNestBookSession {
 
     // MARK: - 要求を出す・受ける
 
-    /// 新しい件の要求を組み立てて出す。出す前に待つ人がいなくなっていたら出さない。
+    /// 新しい件の要求を組み立てて出す（同時の数の枠を取った件だけが来る）。出す前に待つ人がいなくなっていたら出さず、
+    /// 枠を返す（その要求は delegate へ届かないので、完了で返る道が無い）。枠を取ってから出すまでの間に恒久的な失敗が
+    /// 記録されていたら、書き戻しのほかは出さずにその失敗で戻して枠を返す（列から外れた後なので
+    /// `failQueuedFlightsLocked` には見えない）。
     func launch(_ flight: Flight) {
+        if failIfPermanentlyFailed(flight) {
+            releaseSlot(of: flight.serial)
+            return
+        }
         guard let request = makeRequest(for: flight.key) else {
             finish(flight.key, serial: flight.serial, with: .failure(StackNestViewerError(.invalidReference)))
             return
@@ -168,32 +209,74 @@ extension StackNestBookSession {
             ResponseSink(limit: configuration.maxResponseBytes) { [weak self] outcome in
                 self?.finish(key, serial: serial, with: Self.classify(outcome, for: key))
             }, for: task)
-        let started: Bool = lock.withLock {
-            guard !flight.isAbandoned else { return false }
+        var effects = Effects()
+        let (started, hook): (Bool, LaunchHook?) = lock.withLock {
+            guard !flight.isAbandoned else { return (false, nil) }
+            // 上の確かめの後に記録された失敗もここで見る（ここで始めなければ要求は出ない）。
+            if !flight.key.isProgress, let failure = state.permanentFailure {
+                failFlightLocked(flight, with: failure, effects: &effects)
+                return (false, nil)
+            }
             flight.task = task
             task.priority = flight.desiredPriority
-            return true
+            // 表へ載せたのと同じロックの中で始める。載せた後は `removeWaiterLocked`・`close()` が取り消しうるので、
+            // ロックの外で始めると、始める前の取り消しが割り込める。始める前に取り消した要求の完了を `URLSession` が
+            // 知らせるかは文書に無く、枠は完了でだけ返るので、知らされなければ枠が永久に減る。`resume()` は要求を
+            // `URLSession` 自身の列へ渡すだけで delegate を同期に呼ばない（優先度の書き込みと同じ扱い）ので、
+            // 「ロックを持ったまま呼び戻さない」の約束は保てる。
+            task.resume()
+            state.lastLaunchNumber += 1
+            flight.launchNumber = state.lastLaunchNumber
+            return (true, state.launchHookForTesting)
         }
         if started {
-            task.resume()
+            hook?(flight.key, task)
         } else {
             delegate.unregister(task)
             task.cancel()
+            apply(effects)
+            releaseSlot(of: flight.serial)
         }
     }
 
+    /// 恒久的な失敗の後なら（書き戻しのほか）件をその失敗で戻して true。枠は呼び出し側が返す。
+    func failIfPermanentlyFailed(_ flight: Flight) -> Bool {
+        var effects = Effects()
+        let failed: Bool = lock.withLock {
+            guard !flight.key.isProgress, !flight.isAbandoned, let failure = state.permanentFailure else { return false }
+            failFlightLocked(flight, with: failure, effects: &effects)
+            return true
+        }
+        apply(effects)
+        return failed
+    }
+
+    /// 出さなかった件の枠を返し、次の件を出す。
+    func releaseSlot(of serial: UInt64) {
+        let now = configuration.now()
+        var effects = Effects()
+        lock.withLock {
+            state.runningSerials.remove(serial)
+            advanceLocked(now: now, effects: &effects)
+        }
+        apply(effects)
+    }
+
     /// 件の結果を待つ人すべてに渡す。ページはキャッシュへ、恒久的な失敗は記録して先読みと以後のページ・manifest・
-    /// 表紙の要求を止める（`preflightFailureLocked`）。
+    /// 表紙の要求を止める（`preflightFailureLocked`）。出した要求が終わったので枠を返す（取り消した件の完了も
+    /// ここへ来る。その件はもう表に無いので、枠を返すだけ）。
     func finish(_ key: RequestKey, serial: UInt64, with result: Result<FetchedResponse, any Error>) {
         let now = configuration.now()
         var effects = Effects()
         lock.withLock {
+            state.runningSerials.remove(serial)
+            defer { advanceLocked(now: now, effects: &effects) }
             guard let flight = state.flights[key], flight.serial == serial else { return }
             state.flights[key] = nil
-            // Tag the response with its flight's serial so a late recorder can tell old from new.
+            // Tag the response with its flight's launch number so a late recorder can tell old from new.
             var result = result
             if case .success(var response) = result {
-                response.serial = flight.serial
+                response.launchNumber = flight.launchNumber
                 result = .success(response)
             }
             for (ticket, entry) in flight.waiters {
@@ -208,11 +291,33 @@ extension StackNestBookSession {
                 if let failure = error as? StackNestViewerError, failure.isPermanent {
                     state.permanentFailure = failure
                     state.prefetchQueue.removeAll()
+                    failQueuedFlightsLocked(with: failure, effects: &effects)
                 }
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
         }
         apply(effects)
+    }
+
+    /// 恒久的な失敗を受けたとき: 列で待っている件は、書き戻しのほかは要求を出さずにその失敗で戻して列から外す。
+    /// 入口（`preflightFailureLocked`）は失敗の後に来た件しか止めないので、失敗より前に並んだ件もここで止める
+    /// （「恒久的な失敗の後は要求を出さない」の約束）。先読みの指示は結果を受け取らないので、外すだけになる。
+    func failQueuedFlightsLocked(with failure: any Error, effects: inout Effects) {
+        for queued in state.queuedFlights where !queued.key.isProgress {
+            failFlightLocked(queued, with: failure, effects: &effects)
+        }
+        state.queuedFlights.removeAll { !$0.key.isProgress }
+    }
+
+    /// 出していない件を出さずに `failure` で戻す（待つ人すべてを再開し、表から外す）。
+    func failFlightLocked(_ flight: Flight, with failure: any Error, effects: inout Effects) {
+        flight.isAbandoned = true
+        if state.flights[flight.key] === flight { state.flights[flight.key] = nil }
+        for (ticket, entry) in flight.waiters {
+            state.tickets[ticket] = nil
+            if state.prefetchTickets[flight.key] == ticket { state.prefetchTickets[flight.key] = nil }
+            effects.resumes.append((entry.waiter, .failure(failure)))
+        }
+        flight.waiters.removeAll()
     }
 
     /// ロックの外で行う: 取り消し → 再開 → 新しい件の開始。
@@ -295,6 +400,11 @@ extension StackNestBookSession {
     func taskPriorityForTesting(_ key: RequestKey) -> Float? { lock.withLock { state.flights[key]?.task?.priority } }
     var cachedKeysForTesting: [RequestKey] { lock.withLock { state.cache.keys } }
     var ticketCountForTesting: Int { lock.withLock { state.tickets.count } }
+    var queuedKeysForTesting: [RequestKey] { lock.withLock { state.queuedFlights.map(\.key) } }
+    var runningCountForTesting: Int { lock.withLock { state.runningSerials.count } }
+    var hasPermanentFailureForTesting: Bool { lock.withLock { state.permanentFailure != nil } }
+    /// 要求を出した直後（ロックの外）に呼ぶ閉包を置く。出した直後に取り消す試験のため。
+    func setLaunchHookForTesting(_ hook: LaunchHook?) { lock.withLock { state.launchHookForTesting = hook } }
     var urlSessionConfigurationForTesting: URLSessionConfiguration { urlSession.configuration }
     var delegateForTesting: AnyObject { delegate }
 }

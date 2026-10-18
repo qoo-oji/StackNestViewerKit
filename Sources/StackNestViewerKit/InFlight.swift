@@ -20,8 +20,9 @@ enum RequestKey: Hashable, Sendable {
 struct FetchedResponse: Sendable {
     let data: Data
     let contentType: String?
-    /// 応答を返した件の通し番号（`finish` が付ける）。manifest の新旧の順を決める。
-    var serial: UInt64 = 0
+    /// 応答を返した件を出した順の番号（`finish` が付ける）。manifest の新旧の順を決める。件を作った順（通し番号）
+    /// ではなく出した順なのは、件が列で待つので、作った順と StackNest へ出した順が食い違いうるため。
+    var launchNumber: UInt64 = 0
 }
 
 /// `pages/{n}` の 404。顔（async・同期）が manifest を読み直して `.pageOutOfRange` などに振り分ける。外へは出さない。
@@ -76,6 +77,8 @@ final class Flight {
     let key: RequestKey
     let serial: UInt64
     var task: URLSessionDataTask?
+    /// 出した順の番号（`launch` が `resume()` と同じロックの中で付ける。出す前は 0）。
+    var launchNumber: UInt64 = 0
     var waiters: [UInt64: WaiterEntry] = [:]
     /// 待つ人がいなくなって取り消した（まだ出していなければ出さない）。
     var isAbandoned = false
@@ -93,6 +96,14 @@ final class Flight {
     }
 
     var desiredPriority: Float { displayWaiterCount > 0 ? URLSessionTask.highPriority : URLSessionTask.lowPriority }
+
+    /// 出す順の組（小さいほど先）: 0 = 書き戻し（小さく、遅れると読書位置が巻き戻って見える）、1 = 表示の要求が
+    /// 乗っている件、2 = 先読みだけの件。同じ組の中は件を作った順（通し番号の順）。表示の要求が乗れば、その場で
+    /// 1 の組へ上がる。
+    var admissionRank: Int {
+        if key.isProgress { return 0 }
+        return displayWaiterCount > 0 ? 1 : 2
+    }
 }
 
 /// 札（待つ人の ID）の状態。再開の権利はロックの中で 1 度だけ決まる。
@@ -118,15 +129,28 @@ struct EngineState {
     var manifest: StackNestBookManifest?
     /// manifest の件の世代（読み直しのたびに進む）。
     var manifestGeneration: UInt64 = 0
-    /// 最後に反映した manifest の応答の件の通し番号（古い応答で新しい manifest を上書きしない）。
-    var manifestSerial: UInt64 = 0
+    /// 最後に反映した manifest の応答の件を出した順の番号（先に出した件の応答で、後に出した件の manifest を
+    /// 上書きしない）。
+    var manifestLaunchNumber: UInt64 = 0
+    /// 最後に出した件の、出した順の番号。
+    var lastLaunchNumber: UInt64 = 0
     var isClosed = false
     var permanentFailure: StackNestViewerError?
     /// まだ出していない先読み（指示の順）。
     var prefetchQueue: [RequestKey] = []
     /// 取得中の件に乗っている先読みの札。
     var prefetchTickets: [RequestKey: UInt64] = [:]
+    /// まだ出していない件（作った順）。同時の数の枠が空くと、`admissionRank` の順に出す。
+    var queuedFlights: [Flight] = []
+    /// 枠を使っている件の通し番号。出した要求が終わる（delegate が完了を知らせる）まで枠を返さない
+    /// （取り消した要求も、終わるまでは `URLSession` の接続を使っているため）。
+    var runningSerials: Set<UInt64> = []
+    /// 試験だけが置く。要求を出した直後に、ロックの外で呼ぶ。
+    var launchHookForTesting: LaunchHook?
 }
+
+/// 試験の差し込み口: 出した件の鍵とタスク。
+typealias LaunchHook = @Sendable (RequestKey, URLSessionTask) -> Void
 
 /// ロックの中で決め、ロックの外で行うこと。
 struct Effects {
