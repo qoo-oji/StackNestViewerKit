@@ -340,6 +340,8 @@ struct StackNestProgressReporterTests {
         timing.maxWait = .seconds(60)
         let progress = StackNestProgressReporter(session: session, startPage: 0, timing: timing, registry: registry) { _ in }
         let custom = StackNestProgressReporter(startPage: nil, registry: registry, send: { _ in }, onFailure: { _ in })
+        // 登録簿は報告役を弱く持つので、最適化ビルドで早く解放されないよう検証が終わるまで握っておく。
+        defer { withExtendedLifetime((progress, custom)) {} }
         for reporter in [progress, custom] {
             #expect(registry.containsForTesting(reporter))
             #expect(!StackNestProgressRegistry.shared.containsForTesting(reporter))

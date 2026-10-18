@@ -24,10 +24,12 @@ public final class StackNestProgressRegistry {
     public private(set) var isFlushing = false
 
     /// `shared` とは別の登録簿を作る。ホストの試験が、役をプロセスで 1 つの `shared` に載せないために使う
-    /// （役を作るときに `registry:` で渡す）。アプリの終了時に送り切るのは、ふつうは `shared` だけ。
+    /// （役を作るときに `registry:` で渡す）。アプリの終了時に送り切るのは、ふつうは `shared` だけ
+    /// （``flushAllBlocking(timeout:)`` で）。
     ///
     /// Creates a registry separate from `shared`, for host tests that shouldn't put reporters in the process-wide
-    /// one (pass it as `registry:` when creating a reporter). At quit, apps normally flush only `shared`.
+    /// one (pass it as `registry:` when creating a reporter). At quit, apps normally flush only `shared`, with
+    /// ``flushAllBlocking(timeout:)``.
     public init() {}
 
     func register(_ reporter: StackNestProgressReporter) {
@@ -91,7 +93,7 @@ public final class StackNestProgressRegistry {
     /// 送っていない役をすべて、メインスレッドを使わずに今すぐ送り、送り切るか `timeout` が来るまで呼んだスレッドを
     /// ブロックして待つ。返すのは、送るか待つかした役の数（無ければ 0 で、すぐ戻る）。終了時に
     /// `applicationShouldTerminate` から呼び、`.terminateNow` を返す。メインキューの仕事の中から終了が求められても
-    /// 止まらない（送信はメインスレッドの外で走り、待ちはセマフォで数える）。
+    /// 止まらない（送信はメインスレッドの外で走り、呼んだスレッドは `DispatchGroup` で待つ）。
     ///
     /// - 送るのは、各役の止まっているページ（まとめ待ちのものを含む）。StackNest が知っているページ（開いたページ・
     ///   送れたページ）は送らない。
@@ -100,15 +102,18 @@ public final class StackNestProgressRegistry {
     ///   飛んでいた送信が恒久的な失敗なら、後のページも送らない。
     /// - 役は閉じた扱いになり（`note(page:)` は無視される）、以後は送らない。`hasUnsentWork` は false になる。
     ///   送り切れずに `timeout` が来ても同じ（送信はそのまま続き、終了しなければ後で届くことがある）。
-    /// - 失敗は `onFailure` へ知らせない。
+    ///   送るものが実は無かった役（止まっているのが StackNest の知っているページだけの役など）も、`hasUnsentWork` が
+    ///   真なら閉じる。その役は返す数には入らない。
+    /// - この送り切りが送るページの失敗は `onFailure` へ知らせない。呼ぶ前から飛んでいた送信の失敗は、メインアクターが
+    ///   回れば（終了せずに続けたとき）これまでどおり知らせる。
     /// - 送り先を差し替えた役（`init(startPage:timing:send:onFailure:)`）では、その送り先がメインアクターを要るなら、
     ///   待ちの間は進まず `timeout` で戻る。
     ///
     /// Sends every reporter's unsent position now, without using the main thread, and blocks the calling thread until
     /// the sends finish or `timeout` passes. Returns how many reporters it sent or waited for (0, at once, when there is
     /// nothing to send). Call it from `applicationShouldTerminate` at quit and return `.terminateNow`. It works even
-    /// when termination is requested from inside a main-queue job: the sends run off the main thread and the wait is a
-    /// semaphore.
+    /// when termination is requested from inside a main-queue job: the sends run off the main thread and the calling
+    /// thread waits on a `DispatchGroup`.
     ///
     /// - It sends each reporter's waiting page (including one in the batching wait), unless StackNest already has it
     ///   (the start page or a page already sent).
@@ -117,7 +122,10 @@ public final class StackNestProgressRegistry {
     ///   `close()`), and after a permanent failure of that send nothing more is sent.
     /// - The reporters count as closed (`note(page:)` is ignored) and send nothing more; `hasUnsentWork` becomes false.
     ///   This holds even when `timeout` passes first (the sends carry on and may still arrive if the app keeps running).
-    /// - Failures are not reported to `onFailure`.
+    ///   A reporter whose `hasUnsentWork` was true is closed even if it turns out to have nothing to send (say, only a
+    ///   page StackNest already has is waiting); such a reporter is not counted in the result.
+    /// - Failures of the pages this flush sends are not reported to `onFailure`. A send that was already in flight
+    ///   before the call still reports its failure as before, once the main actor runs (if the app keeps running).
     /// - With a custom sender (`init(startPage:timing:send:onFailure:)`) that needs the main actor, the send cannot
     ///   progress during the wait, and the call returns at `timeout`.
     @discardableResult

@@ -85,6 +85,8 @@ struct PublicAPITests {
         let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
         let registry = StackNestProgressRegistry()
         let reporter = StackNestProgressReporter(session: session, startPage: 0, registry: registry) { _ in }
+        // 登録簿は報告役を弱く持つので、最適化ビルドで早く解放されないよう検証が終わるまで握っておく。
+        defer { withExtendedLifetime(reporter) {} }
         reporter.note(page: 2)
         #expect(registry.hasUnsentWork)
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
