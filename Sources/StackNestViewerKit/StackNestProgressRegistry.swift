@@ -25,7 +25,12 @@ public final class StackNestProgressRegistry {
     /// Whether a flush is in progress (a second quit request should wait for it).
     public private(set) var isFlushing = false
 
-    init() {}
+    /// `shared` とは別の登録簿を作る。ホストの試験が、役をプロセスで 1 つの `shared` に載せないために使う
+    /// （役を作るときに `registry:` で渡す）。アプリの終了時に送り切るのは、ふつうは `shared` だけ。
+    ///
+    /// Creates a registry separate from `shared`, for host tests that shouldn't put reporters in the process-wide
+    /// one (pass it as `registry:` when creating a reporter). At quit, apps normally flush only `shared`.
+    public init() {}
 
     func register(_ reporter: StackNestProgressReporter) {
         entries.removeAll { $0.reporter == nil }
@@ -64,6 +69,11 @@ public final class StackNestProgressRegistry {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout.timeInterval) { MainActor.assumeIsolated { finish() } }
         return true
+    }
+
+    /// 役が載っているか（試験が見る）。
+    func containsForTesting(_ reporter: StackNestProgressReporter) -> Bool {
+        entries.contains { $0.reporter === reporter }
     }
 
     /// 1 度だけ真を返す印（送り切りとタイマーのどちらが先でも、completion を 1 度だけ呼ぶ）。

@@ -69,9 +69,25 @@ public final class StackNestProgressReporter {
         self.init(startPage: startPage, timing: timing, registry: .shared, send: send, onFailure: onFailure)
     }
 
-    /// 登録簿を選べる形（試験が共有の登録簿を汚さないため）。
-    init(startPage: Int?, timing: Timing, registry: StackNestProgressRegistry, send: @escaping Send,
-         onFailure: @escaping @MainActor (StackNestViewerError) -> Void)
+    /// セッションへ書き戻す役を作り、`registry` に弱い参照で載せる（`StackNestProgressRegistry.shared` には載せない）。
+    /// ホストの試験が、プロセスで 1 つの登録簿（と、それを送り切るアプリの終了の処理）に役を残さないためのもの。
+    ///
+    /// Creates a reporter that posts to `session` and registers it (weakly) with `registry` instead of
+    /// `StackNestProgressRegistry.shared`, so a host's tests don't leave reporters in the process-wide registry
+    /// (which the app's quit-time flush would wait for).
+    public convenience init(session: StackNestBookSession, startPage: Int?, timing: Timing = .init(),
+                            registry: StackNestProgressRegistry,
+                            onFailure: @escaping @MainActor (StackNestViewerError) -> Void)
+    {
+        self.init(startPage: startPage, timing: timing, registry: registry,
+                  send: { page in try await session.postProgress(page: page) }, onFailure: onFailure)
+    }
+
+    /// 送り先と登録簿を選べる形。役は `registry` に弱い参照で載り、`StackNestProgressRegistry.shared` には載らない。
+    ///
+    /// Takes a custom sender and registers the reporter (weakly) with `registry` instead of the shared registry.
+    public init(startPage: Int?, timing: Timing = .init(), registry: StackNestProgressRegistry, send: @escaping Send,
+                onFailure: @escaping @MainActor (StackNestViewerError) -> Void)
     {
         lastSentPage = startPage
         self.timing = timing

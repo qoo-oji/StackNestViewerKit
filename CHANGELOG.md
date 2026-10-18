@@ -31,6 +31,8 @@ Release notes.
   Non-2xx responses are now classified by their status code before the body size limit applies. A 401, 403, 404 and so on that announced (or sent) a large body used to become the transient `responseTooLarge`, hiding the real failure and leaving prefetching running. The bodies of non-2xx responses are no longer read.
 - `manifest(refresh: true)`（同期の顔も）と、`pages/{n}` の 404 の後の manifest の確かめが、呼ぶ前から飛んでいた manifest の要求に乗らないようにした。乗ると変わる前のページ数を受け取ることがあり、減ったページの 404 が `pageOutOfRange` ではなく `httpStatus(404)` になっていた。`refresh` を付けない読み出しは、これまでどおり飛んでいる要求に乗る。
   `manifest(refresh: true)` (on the blocking face too) and the manifest check after a `pages/{n}` 404 no longer join a manifest request that was already in flight before the call. Joining could return the page count from before a change, so a 404 for a removed page was reported as `httpStatus(404)` instead of `pageOutOfRange`. Reads without `refresh` still join a request in flight.
+- `StackNestProgressRegistry` の公開の `init()` と、登録簿を渡せる `StackNestProgressReporter` の `init(session:startPage:timing:registry:onFailure:)`・`init(startPage:timing:registry:send:onFailure:)`。ホストの試験が、役をプロセスで 1 つの `StackNestProgressRegistry.shared` に載せずに済む。`registry:` を取らない形はこれまでどおり `shared` に載せる。
+  A public `StackNestProgressRegistry.init()` and `StackNestProgressReporter` initializers that take a registry (`init(session:startPage:timing:registry:onFailure:)` and `init(startPage:timing:registry:send:onFailure:)`), so host tests can keep their reporters out of the process-wide `StackNestProgressRegistry.shared`. The initializers without `registry:` still use `shared`.
 
 ## [0.1.0] - 2026-10-18
 
