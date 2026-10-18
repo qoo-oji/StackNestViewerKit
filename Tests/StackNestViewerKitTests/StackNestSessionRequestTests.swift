@@ -138,6 +138,48 @@ struct StackNestSessionRequestTests {
         #expect(StackNestBookSession.Configuration().maxResponseBytes == 64 * 1024 * 1024)
     }
 
+    static let largeErrorBodyCases: [(StackNestStubServer.Route, Int, [String: String], StackNestViewerError)] = [
+        (.manifest, 401, [:], StackNestViewerError(.unauthorized)),
+        (.manifest, 403, ["X-Library-Locked": "1"], StackNestViewerError(.libraryLocked)),
+        (.manifest, 404, [:], StackNestViewerError(.bookNotFound)),
+        (.progress, 404, [:], StackNestViewerError(.bookNotFound)),
+        (.cover, 404, [:], StackNestViewerError(.httpStatus, statusCode: 404)),
+        (.manifest, 500, [:], StackNestViewerError(.httpStatus, statusCode: 500)),
+        (.manifest, 502, [:], StackNestViewerError(.remoteUnavailable)),
+    ]
+
+    @Test("2xx でない応答は、本文が上限を超えても（申告でも実際の量でも）状態コードで振り分ける",
+          arguments: largeErrorBodyCases)
+    func errorStatusIsClassifiedBeforeTheSizeLimit(route: StackNestStubServer.Route, status: Int,
+                                                   headers: [String: String], expected: StackNestViewerError) async throws
+    {
+        for announced in [true, false] {
+            let stub = StackNestStubServer(pageCount: 3)
+            var allHeaders = headers
+            if announced { allHeaders["Content-Length"] = "5000" }
+            stub.respond(route, with: .status(status, headers: allHeaders, body: Data(count: 2000)))
+            let session = try makeSession(stub) { $0.maxResponseBytes = 1000 }
+            await #expect(throws: expected, "Content-Length の申告: \(announced)") {
+                switch route {
+                case .cover: _ = try await session.cover()
+                case .progress: try await session.postProgress(page: 1)
+                default: _ = try await session.manifest()
+                }
+            }
+        }
+    }
+
+    @Test("大きな本文の 2xx でない応答の恒久的な失敗も記録する（先読みが止まる）")
+    func largeUnauthorizedBodyStopsPrefetching() async throws {
+        let stub = StackNestStubServer(pageCount: 5)
+        stub.respond(.manifest, with: .status(401, headers: ["Content-Length": "999999"], body: Data(count: 10)))
+        let session = try makeSession(stub) { $0.maxResponseBytes = 1000 }
+        await #expect(throws: StackNestViewerError(.unauthorized)) { try await session.manifest() }
+        session.prefetch([0, 1])
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stub.requests.map(\.route) == [.manifest])
+    }
+
     @Test("要求の URL は基点の後ろへ文字列で足す（IPv6 の区域 ID・末尾のスラッシュでも同じ宛先のまま）")
     func ipv6ZoneEndpoint() throws {
         let book = URL(string: "http://[fe80::1%25en0]:51234/api/v1/libraries/L/books/7/")!
