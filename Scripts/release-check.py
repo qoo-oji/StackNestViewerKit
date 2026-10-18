@@ -62,7 +62,7 @@ def accepted_contributors(text):
         if not local or "@" in local:
             raise CheckError(f"{CONTRIBUTORS} の {number} 行目は GitHub の noreply のアドレスではありません / "
                              f"Line {number} of {CONTRIBUTORS} isn't a GitHub noreply address")
-        if name.casefold() == IDENTITY[0].casefold():
+        if name.casefold() == IDENTITY[0].casefold() or email.casefold() == IDENTITY[1].casefold():
             raise CheckError(f"{CONTRIBUTORS} の {number} 行目は shelfsmith です（持ち主の名義は一覧に書かない） / "
                              f"Line {number} of {CONTRIBUTORS} names shelfsmith, which is never listed")
         accepted.add((name, email))

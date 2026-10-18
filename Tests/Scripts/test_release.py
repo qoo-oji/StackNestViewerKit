@@ -250,6 +250,10 @@ class ReleaseScriptTests(unittest.TestCase):
         self.accept("shelfsmith <290546180+shelfsmith@users.noreply.github.com>")
         self.refused("never listed")
 
+    def test_refuses_the_owner_address_under_another_name_in_the_list(self):
+        self.accept("alias <290546180+shelfsmith@users.noreply.github.com>")
+        self.refused("never listed")
+
 
 if __name__ == "__main__":
     unittest.main()
