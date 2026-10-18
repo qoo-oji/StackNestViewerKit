@@ -1,0 +1,13 @@
+# プルリクエストを受け入れた外部の貢献者 / Outside contributors whose pull requests were merged
+#
+# Scripts/release.sh は、前回の公開のタグからのコミットの作成者・コミッタが shelfsmith か、ここにある名義であることを求める。
+# Scripts/release.sh requires every commit since the last published tag to be authored and committed by
+# shelfsmith or by an identity listed here.
+#
+# - 1 行に 1 人、`名前 <メールアドレス>` の形で書く。`#` で始まる行と空行は無視する。
+#   One `Name <email>` per line. Lines starting with `#` and blank lines are ignored.
+# - 書いてよいのは、プルリクエストを受け入れた貢献者の GitHub の noreply のアドレス（`@users.noreply.github.com`）だけ。
+#   保守する人が、受け入れたときに足す。形の崩れた行・noreply でないアドレスがあると検査は失敗する。
+#   Only the GitHub noreply address (`@users.noreply.github.com`) of a contributor whose pull request was merged
+#   belongs here, added by the maintainer. A malformed line or a non-noreply address makes the check fail.
+qoo-oji <308961417+qoo-oji@users.noreply.github.com>

@@ -6,6 +6,7 @@ Pre-release checks. This never creates tags or pushes.
 
 import argparse
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,9 @@ sys.path.insert(0, str(ROOT / "Scripts"))
 from release_support import INFO, declared_versions, private_markers, release_entry, stable_version  # noqa: E402
 
 IDENTITY = ("shelfsmith", "290546180+shelfsmith@users.noreply.github.com")
+CONTRIBUTORS = "Scripts/accepted-contributors.txt"
+CONTRIBUTOR_LINE = re.compile(r"([^<>]*[^<>\s]) <([^<>\s]+)>")
+NOREPLY = "@users.noreply.github.com"
 
 
 class CheckError(Exception):
@@ -40,6 +44,26 @@ def run_script(name, *args):
     result = subprocess.run([str(ROOT / "Scripts" / name), *args], cwd=ROOT, text=True, capture_output=True)
     if result.returncode:
         raise CheckError(f"{name}: {result.stderr.strip()}")
+
+
+def accepted_contributors(text):
+    """受け入れた貢献者の一覧を (名前, アドレス) の集合にする。形が崩れた行・noreply でないアドレスは失敗にする。"""
+    accepted = set()
+    for number, line in enumerate(text.splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = CONTRIBUTOR_LINE.fullmatch(line)
+        if match is None:
+            raise CheckError(f"{CONTRIBUTORS} の {number} 行目が `名前 <アドレス>` の形ではありません / "
+                             f"Line {number} of {CONTRIBUTORS} isn't `Name <email>`")
+        name, email = match.groups()
+        local = email[: -len(NOREPLY)] if email.endswith(NOREPLY) else ""
+        if not local or "@" in local:
+            raise CheckError(f"{CONTRIBUTORS} の {number} 行目は GitHub の noreply のアドレスではありません / "
+                             f"Line {number} of {CONTRIBUTORS} isn't a GitHub noreply address")
+        accepted.add((name, email))
+    return accepted
 
 
 def main():
@@ -97,10 +121,16 @@ def main():
             since = [f"{base}..HEAD"]
         else:
             since = ["HEAD"]
-        for line in git("log", "--format=%an%x09%ae%x09%cn%x09%ce", *since).splitlines():
-            name, email, committer, committer_email = line.split("\t")
-            if (name, email) != IDENTITY or (committer, committer_email) != IDENTITY:
-                raise CheckError("shelfsmith 以外の作成者・コミッタのコミットがあります / A commit isn't by shelfsmith")
+        # 一覧は HEAD のものを読む（作業ツリーはクリーンであることを確かめ済み）。無ければ shelfsmith だけを認める。
+        if git("ls-tree", "--name-only", "HEAD", "--", CONTRIBUTORS).strip():
+            allowed = {IDENTITY} | accepted_contributors(git("show", f"HEAD:{CONTRIBUTORS}"))
+        else:
+            allowed = {IDENTITY}
+        for line in git("log", "--format=%h%x09%an%x09%ae%x09%cn%x09%ce", *since).splitlines():
+            commit, name, email, committer, committer_email = line.split("\t")
+            if (name, email) not in allowed or (committer, committer_email) not in allowed:
+                raise CheckError(f"コミット {commit} の作成者・コミッタが shelfsmith でも {CONTRIBUTORS} の貢献者でもありません / "
+                                 f"Commit {commit} isn't by shelfsmith or a contributor listed in {CONTRIBUTORS}")
         run_script("check-commit-trailers.sh", "range", *since)
         run_script("check-internal-markers.sh", "range", *since)
         run_script("check-internal-markers.sh", "tree", "HEAD")

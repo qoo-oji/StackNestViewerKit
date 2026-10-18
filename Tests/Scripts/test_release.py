@@ -12,6 +12,9 @@ IDENTITY = {"GIT_AUTHOR_NAME": "shelfsmith", "GIT_COMMITTER_NAME": "shelfsmith",
             "GIT_AUTHOR_EMAIL": "290546180+shelfsmith@users.noreply.github.com",
             "GIT_COMMITTER_EMAIL": "290546180+shelfsmith@users.noreply.github.com"}
 INFO = 'public enum StackNestViewerKitInfo {\n    public static let version = "{version}"\n}\n'
+CONTRIBUTOR = {"GIT_AUTHOR_NAME": "contributor", "GIT_COMMITTER_NAME": "contributor",
+               "GIT_AUTHOR_EMAIL": "1+contributor@users.noreply.github.com",
+               "GIT_COMMITTER_EMAIL": "1+contributor@users.noreply.github.com"}
 CHANGELOG = "# 変更履歴 / Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-20\n\n### 追加 / Added\n- 最初の版 / First release\n"
 
 
@@ -156,6 +159,56 @@ class ReleaseScriptTests(unittest.TestCase):
         self.git("commit", "-q", "-m", "Remove note")
         self.git("tag", "-f", "0.0.9")  # the local tag moves past the commit that added the marker
         self.refused("check-internal-markers.sh")
+
+    def accept(self, *lines):
+        (self.repo / "Scripts/accepted-contributors.txt").write_text("# accepted\n\n" + "".join(f"{line}\n" for line in lines))
+        self.commit("Accept contributors")
+
+    def contribute(self, env):
+        (self.repo / "note.txt").write_text("x")
+        self.commit("Contribution", env={**self.env, **env})
+        return self.git("rev-parse", "--short", "HEAD").strip()
+
+    def test_passes_a_listed_contributor(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        self.contribute(CONTRIBUTOR)
+        result = self.release()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_passes_a_listed_author_committed_by_shelfsmith(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        self.contribute({key: value for key, value in CONTRIBUTOR.items() if key.startswith("GIT_AUTHOR")})
+        self.assertEqual(self.release().returncode, 0)
+
+    def test_refuses_an_unlisted_contributor_and_names_the_commit(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        commit = self.contribute({**CONTRIBUTOR, "GIT_AUTHOR_NAME": "other", "GIT_COMMITTER_NAME": "other",
+                                  "GIT_AUTHOR_EMAIL": "2+other@users.noreply.github.com",
+                                  "GIT_COMMITTER_EMAIL": "2+other@users.noreply.github.com"})
+        self.refused(commit)
+
+    def test_refuses_a_listed_name_with_another_email(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        self.contribute({**CONTRIBUTOR, "GIT_AUTHOR_EMAIL": "contributor@example.com"})
+        self.refused("shelfsmith")
+
+    def test_refuses_a_contributor_without_a_list(self):
+        self.contribute(CONTRIBUTOR)
+        self.refused("shelfsmith")
+
+    def test_refuses_a_list_entry_that_is_not_a_noreply_address(self):
+        for entry in ["someone <someone@example.com>", "someone <@users.noreply.github.com>",
+                      "someone <a@b@users.noreply.github.com>"]:
+            with self.subTest(entry=entry):
+                self.accept(entry)
+                self.refused("noreply")
+
+    def test_refuses_a_malformed_list_line(self):
+        for entry in ["1+contributor@users.noreply.github.com", "contributor", "<1+contributor@users.noreply.github.com>",
+                      "contributor <1+contributor@users.noreply.github.com> extra"]:
+            with self.subTest(entry=entry):
+                self.accept(entry)
+                self.refused("Name <email>")
 
 
 if __name__ == "__main__":

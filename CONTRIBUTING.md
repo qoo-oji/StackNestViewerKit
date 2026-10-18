@@ -48,11 +48,16 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
    Commit.
 4. `Scripts/release.sh X.Y.Z` を実行する。検査だけで、タグも push もしない。`core.hooksPath` が `Scripts/githooks`、
    作業ツリーがクリーン、CHANGELOG の見出しと `StackNestViewerKitInfo.version` が X.Y.Z、X.Y.Z が公開済みの最新のタグより新しいことを求め、
-   さらに shelfsmith 名義の確認、`Claude-Session:` の行・内部の印・個人識別子の検査（識別子の一覧が要る）を行う。
+   さらに名義の確認（前回の公開のタグからの各コミットの作成者・コミッタが shelfsmith か、`Scripts/accepted-contributors.txt` に
+   ある貢献者であること。一覧にはプルリクエストを受け入れた貢献者の GitHub の noreply のアドレスだけを、受け入れたときに足す）、
+   `Claude-Session:` の行・内部の印・個人識別子の検査（識別子の一覧が要る）を行う。
    公開済みのタグのコミットが手元に無いと言われたら `git fetch --tags` を実行する。
    Run `Scripts/release.sh X.Y.Z`. It only checks; it never tags or pushes. It requires `core.hooksPath` to be
    `Scripts/githooks`, a clean working tree, the changelog heading and `StackNestViewerKitInfo.version` to be X.Y.Z,
-   and X.Y.Z to be newer than the latest published tag. It also checks the shelfsmith authorship and runs the
+   and X.Y.Z to be newer than the latest published tag. It also checks the authorship (every commit since the last
+   published tag must be authored and committed by shelfsmith or by a contributor listed in
+   `Scripts/accepted-contributors.txt`; when merging a pull request, add only that contributor's GitHub noreply
+   address there) and runs the
    `Claude-Session:` trailer, internal-marker and personal-identifier checks (the identifier list must exist).
    If it says the published tag's commit isn't here, run `git fetch --tags`.
 5. 作者の許可のもとで main を push する。
