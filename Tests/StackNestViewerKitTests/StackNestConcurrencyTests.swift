@@ -254,6 +254,35 @@ struct StackNestConcurrencyTests {
         try? await Task.sleep(for: .milliseconds(100))
         #expect(stub.requests.map(\.route) == [.page(0), .progress], "失敗の後に出たのは書き戻しだけ")
     }
+
+    @Test("枠を取ってから出すまでの間に恒久的な失敗が記録されたら、その件は出さずに枠を返す", .timeLimit(.minutes(1)))
+    func permanentFailureBetweenAdmissionAndLaunchSendsNothing() async throws {
+        let stub = StackNestStubServer(pageCount: 8)
+        stub.respond(.page(0), with: .status(401))
+        let gate = stub.gate(.page(0))
+        defer { gate.open() }
+        let session = try makeSession(stub) { $0.maxConcurrentRequests = 3 }
+        let holder = Task { try await session.page(0) }
+        #expect(await gate.arrival())
+        // 先読みの 2 件は同じ周で枠を取り、続けて出される。1 件目を出した直後（2 件目を出す前）に、走っている
+        // page(0) の 401 を受け取り終えるまで待つ: 2 件目は列から外れた後なので、出す側で止めるしかない。
+        session.setLaunchHookForTesting { key, _ in
+            guard key == .page(index: 1, maxWidth: nil) else { return }
+            gate.open()
+            let deadline = Date().addingTimeInterval(5)
+            while !session.hasPermanentFailureForTesting, Date() < deadline { Thread.sleep(forTimeInterval: 0.005) }
+        }
+        session.prefetch([1, 2])
+        session.setLaunchHookForTesting(nil)
+        #expect(session.hasPermanentFailureForTesting)
+        await #expect(throws: StackNestViewerError(.unauthorized)) { try await holder.value }
+        #expect(await waitUntil { session.runningCountForTesting == 0 && session.inFlightKeysForTesting.isEmpty },
+                "出さなかった件の枠も返る")
+        #expect(session.ticketCountForTesting == 0)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stub.requestCount(.page(2)) == 0, "恒久的な失敗の後に要求は出ない")
+        #expect(stub.requestCount(.page(1)) <= 1)
+    }
 }
 
 /// 出した要求のタスクの状態の記録（差し込み口から別のスレッドで書く）。
