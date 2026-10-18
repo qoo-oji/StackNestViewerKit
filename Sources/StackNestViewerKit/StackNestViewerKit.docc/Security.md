@@ -32,6 +32,25 @@ func lanConfiguration() -> StackNestBookSession.Configuration {
 }
 ```
 
+## パスの形 / Book Paths
+
+宛先を loopback に絞っても、ポートとパスは参照ファイルが決める。書き換えた参照ファイルの `book` が 127.0.0.1 の別の
+サービスの道を指すと、鍵の付いた決まった形の要求（`GET …/manifest`・`POST …/progress` など）をそのサービスへ送って
+しまう。そのため既定では、`book` のパスが StackNest の書く形（`/api/v1/libraries/<library>/books/<id>` と
+`/api/v1/relay/<relayID>`。区切りは英数字と `-._~` だけ・末尾のスラッシュは 1 つまで）のときだけ要求を出し、ほかは
+要求なしで `invalidReference` を返す（``StackNestBookSession/init(contentsOf:configuration:)`` は開く時点で断る）。
+ほかの形の基点へ承知でつなぐときだけ ``StackNestBookSession/Configuration-swift.struct/allowsAnyBookPath`` を立てる。
+
+Restricting hosts to loopback still leaves the port and path to the reference file. If a tampered file points `book`
+at a path of another service on 127.0.0.1, the session would send that service fixed-shape requests carrying the
+token (`GET …/manifest`, `POST …/progress` and so on). So by default the session makes requests only when the path
+of `book` has one of the shapes StackNest writes (`/api/v1/libraries/<library>/books/<id>` and
+`/api/v1/relay/<relayID>`, with segments of letters, digits and `-._~` only and at most one trailing slash), and
+otherwise fails with `invalidReference` without a request
+(``StackNestBookSession/init(contentsOf:configuration:)`` refuses when opening). Set
+``StackNestBookSession/Configuration-swift.struct/allowsAnyBookPath`` only when you knowingly connect to a base of
+another shape.
+
 ## 要求 / Requests
 
 - リダイレクトには付いて行かない（3xx は `httpStatus`）。鍵は `book` の宛先にだけ送る。

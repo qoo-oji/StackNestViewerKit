@@ -145,6 +145,7 @@ Example: `X-StackNest-Viewer: com.example.viewer/1.80; format=1; kit=0.1.0`
 - The token is a secret. Don't log it or send it anywhere else (see Security notes below).
 - Traffic is plain HTTP (StackNest is meant for a LAN or Tailscale). Allow plain HTTP to 127.0.0.1 and the LAN in App Transport Security, and if the viewer is sandboxed, give it the outgoing network (client) entitlement.
 - StackNestViewerKit connects only to `127.0.0.1` and `::1` by default, because StackNest writes `book` on 127.0.0.1 for local and relayed remote books alike. A viewer that needs another host must allow it explicitly (`allowedHosts`).
+- By default StackNestViewerKit makes requests only when the path of `book` has one of the two shapes StackNest writes (`/api/v1/libraries/<lib>/books/<id>` and `/api/v1/relay/<relayID>`), and otherwise fails with `invalidReference` without a request (tell the reader to open the book from StackNest again). Each segment must be non-empty, not `.` or `..`, and made of letters, digits and `-._~` only (no percent-encoding), with at most one trailing slash. A viewer that needs a base of another shape must allow it explicitly (`allowsAnyBookPath`). Viewers implementing this document directly should make the same check (see Security notes below).
 
 ## Security notes
 
@@ -152,6 +153,7 @@ Example: `X-StackNest-Viewer: com.example.viewer/1.80; format=1; kit=0.1.0`
 - When the base in `book` is a plain `http://` address on a LAN, the token travels in cleartext. StackNest serves plain HTTP only. Over a plain LAN the token is not encrypted; using StackNest's remote connection over Tailscale encrypts it. When remote books are relayed (the trial default), the viewer's traffic stays within 127.0.0.1, and the hop between StackNest and the remote server takes the same path as StackNest's remote connection.
 - The base may be an IPv6 literal (for example `http://[fe80::1%25en0]:51234/…`), so the viewer must parse bracketed hosts, including zone IDs.
 - Send the token only to the origin (scheme, host and port) given by `book` in the file. Don't attach it to redirects or to any other host.
+- Restricting the host to 127.0.0.1 still leaves the port and path to the reference file. If a tampered file points `book` at a path of another service on 127.0.0.1, the viewer sends that service fixed-shape requests carrying the token (`GET {book}/manifest`, `POST {book}/progress` and so on). Check that the path of `book` has one of the shapes StackNest writes (the two above) before making requests (StackNestViewerKit does so by default).
 - Only the principal that issued a token can read whether it was used (`GET /api/v1/viewer-tokens/{tokenID}`). But when the shared server runs with a fixed token (no grants), principals can't be told apart, so every connection holding that token can read the use status (the time and the identification header only) of per-book tokens issued with it. On the 127.0.0.1 endpoint with Local Control on, the CLI and MCP token can read the status of tokens the app issued. Either way only the identification header's value is visible, never the book or the token.
 
 ## Versions
@@ -171,3 +173,4 @@ Changes to this document that don't change the format version.
 | Date | Change |
 |---|---|
 | 2026-10-10 | Moved to the StackNestViewerKit repository. Added `kit=` to the identification header, relayed pages, the characters of `token`, the accepted forms of `expiresAt` and StackNestViewerKit's loopback default |
+| 2026-10-18 | Added that StackNestViewerKit checks the shape of the `book` path by default (`allowsAnyBookPath`), and the security reason for it |

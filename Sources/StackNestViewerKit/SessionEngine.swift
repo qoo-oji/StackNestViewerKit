@@ -60,11 +60,15 @@ extension StackNestBookSession {
     }
 
     /// 要求を出す前の検査。閉じた後のページ・manifest・表紙は取り消し、つないでよいホストでなければ
-    /// `.hostNotAllowed`、期限を過ぎていれば `.expired`（読む途中にも切れるので毎回見る）。
+    /// `.hostNotAllowed`、パスが StackNest の書く形でなければ `.invalidReference`（`allowsAnyBookPath` で外せる）、
+    /// 期限を過ぎていれば `.expired`（読む途中にも切れるので毎回見る）。
     func preflightFailureLocked(for key: RequestKey, now: Date) -> (any Error)? {
         if state.isClosed, !key.isProgress { return CancellationError() }
         guard configuration.allowedHosts.allows(reference.bookURL) else {
             return StackNestViewerError(.hostNotAllowed)
+        }
+        guard configuration.allowsAnyBookPath || StackNestBookPath.isStackNestShape(reference.bookURL) else {
+            return StackNestViewerError(.invalidReference)
         }
         guard !reference.isExpired(at: now) else { return StackNestViewerError(.expired) }
         return nil
