@@ -441,3 +441,218 @@ struct StackNestProgressRegistryTests {
         #expect(sent.attemptCount == 1)
     }
 }
+
+/// 終了時の送り切りのうち、メインスレッドを使わずに待つ形（`flushAllBlocking`）。呼んだスレッド（ここではメイン
+/// スレッド）を止めるので、ほかの試験の時間の前提を崩さないよう、1 つずつ・短い時間で走らせる。
+@MainActor
+@Suite("書き戻しの登録簿: メインスレッドで待つ送り切り", .serialized)
+struct StackNestBlockingFlushTests {
+    private func reporter(_ sent: ScriptedSend, _ registry: StackNestProgressRegistry) -> StackNestProgressReporter {
+        StackNestProgressReporter(startPage: 0, timing: .init(), registry: registry,
+                                  send: { try await sent.send($0) }, onFailure: { _ in })
+    }
+
+    private final class Completions {
+        var count = 0
+    }
+
+    /// `body` をメインキューの仕事として走らせ、その結果を待つ（`NSApp.terminate(nil)` を
+    /// `DispatchQueue.main.async` の中から呼んだときと同じ形）。
+    private func inMainQueueJob<T: Sendable>(_ body: @escaping @MainActor () -> T) async -> T {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+            DispatchQueue.main.async { MainActor.assumeIsolated { continuation.resume(returning: body()) } }
+        }
+    }
+
+    /// セッションを通して見立てへ書き戻す役（登録簿は試験ごとに別）。
+    private func sessionReporter(_ session: StackNestBookSession,
+                                 _ registry: StackNestProgressRegistry) -> StackNestProgressReporter
+    {
+        StackNestProgressReporter(startPage: 0, timing: .init(), registry: registry,
+                                  send: { [session] page in try await session.postProgress(page: page) }, onFailure: { _ in })
+    }
+
+    @Test("flushAllBlocking: まとめ待ちの位置をすべて送り、送り終えたら上限を待たずに戻る")
+    func blockingFlushSendsEveryReporter() {
+        let registry = StackNestProgressRegistry()
+        let first = ScriptedSend()
+        let second = ScriptedSend()
+        let a = reporter(first, registry)
+        let b = reporter(second, registry)
+        a.note(page: 4)
+        b.note(page: 9)
+        let start = ContinuousClock.now
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 2)
+        #expect(ContinuousClock.now - start < .seconds(5))
+        #expect(first.pages == [4])
+        #expect(second.pages == [9])
+        #expect(!registry.hasUnsentWork)
+    }
+
+    @Test("flushAllBlocking: メインキューの仕事の中から呼んでも、飛んでいる送信の後に止まっていたページを送って戻る")
+    func blockingFlushWorksInsideAMainQueueJob() async throws {
+        let stub = StackNestStubServer()
+        let session = try makeSession(stub)
+        let registry = StackNestProgressRegistry()
+        let progress = sessionReporter(session, registry)
+        let gate = stub.gate(.progress)
+        progress.note(page: 1)
+        progress.flush()
+        #expect(await gate.arrival())
+        progress.note(page: 2)
+        // メインスレッドが待っている間に、飛んでいる送信（1）の応答を流す。その送信の続き（メインアクター）は
+        // 待ちの間は走れないので、2 を送れるのは送り切りがメインスレッドの外で 1 の終わりを知ったときだけ。
+        Thread {
+            Thread.sleep(forTimeInterval: 0.05)
+            gate.open()
+        }.start()
+        let (count, elapsed) = await inMainQueueJob { () -> (Int, Duration) in
+            let start = ContinuousClock.now
+            let count = registry.flushAllBlocking(timeout: .seconds(10))
+            return (count, ContinuousClock.now - start)
+        }
+        #expect(count == 1)
+        #expect(elapsed < .seconds(5))
+        #expect(stub.requests.filter { $0.route == .progress }.map(\.progressPage) == [1, 2])
+        #expect(!registry.hasUnsentWork)
+        // 1 の送信の続きが後でメインアクターで走っても、送り直さない。閉じた役は note も受けない。
+        await progress.waitUntilIdle()
+        progress.note(page: 3)
+        progress.flush()
+        await progress.waitUntilIdle()
+        #expect(stub.requests.filter { $0.route == .progress }.map(\.progressPage) == [1, 2])
+    }
+
+    @Test("flushAll はメインキューの仕事の中で待つと、送れても completion も上限も来ない（flushAllBlocking が要る理由）")
+    func mainQueueFlushStallsInsideAMainQueueJob() async {
+        let registry = StackNestProgressRegistry()
+        let sent = ScriptedSend()
+        let progress = reporter(sent, registry)
+        progress.note(page: 4)
+        let done = Completions()
+        let stalled = await inMainQueueJob { () -> Bool in
+            registry.flushAll(timeout: .milliseconds(30)) { done.count += 1 }
+            // AppKit が終了の応答を待つのと同じく、この仕事の中で run loop を回す（上限の 30 ms を十分に超えて）。
+            // メインキューは入れ子では回らない。
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            return done.count == 0
+        }
+        // 確かめるのは「completion も上限も来ない」ことだけ。送信そのものはメインの外で始まるが、この 0.2 秒の間に
+        // 終わるかは機械の速さしだい(遅い CI の機械では終わらなかった)なので、ここでは見ない。
+        #expect(stalled)
+        // 仕事を抜ければ進む。
+        while done.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [4])
+    }
+
+    @Test("flushAllBlocking: StackNest が答えなくても timeout で戻り、以後その役は送らない")
+    func blockingFlushReturnsAtTheCap() async throws {
+        let stub = StackNestStubServer()
+        let session = try makeSession(stub)
+        let registry = StackNestProgressRegistry()
+        let progress = sessionReporter(session, registry)
+        let gate = stub.gate(.progress)
+        defer { gate.open() }
+        progress.note(page: 4)
+        let start = ContinuousClock.now
+        #expect(registry.flushAllBlocking(timeout: .milliseconds(200)) == 1)
+        let elapsed = ContinuousClock.now - start
+        #expect(elapsed >= .milliseconds(150))
+        #expect(elapsed < .seconds(3))
+        #expect(await gate.arrival())
+        #expect(!progress.hasUnsentWork)
+        #expect(!registry.hasUnsentWork)
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 0)
+        gate.open()
+        await progress.waitUntilIdle()
+        progress.note(page: 5)
+        progress.flush()
+        await progress.waitUntilIdle()
+        #expect(await waitUntil { stub.requests.filter { $0.route == .progress }.count == 1 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stub.requests.filter { $0.route == .progress }.map(\.progressPage) == [4])
+    }
+
+    @Test("flushAllBlocking: 同じ周で close・flush した直後に呼んでも、その送信を待たずに止めず送り切る")
+    func blockingFlushRightAfterCloseInTheSameTurn() {
+        let registry = StackNestProgressRegistry()
+        let first = ScriptedSend()
+        let second = ScriptedSend()
+        let closing = reporter(first, registry)
+        let flushing = reporter(second, registry)
+        closing.note(page: 3)
+        closing.close() // 送信はここで始まる（メインアクターのタスクの番を待たない）
+        flushing.note(page: 6)
+        flushing.flush()
+        let start = ContinuousClock.now
+        #expect(registry.flushAllBlocking(timeout: .seconds(10)) == 2)
+        #expect(ContinuousClock.now - start < .seconds(5))
+        #expect(first.pages == [3])
+        #expect(second.pages == [6])
+    }
+
+    @Test("flushAllBlocking: 送った役は、その後の note・flush・close でも送らない")
+    func blockingFlushedReporterSendsNothingMore() async {
+        let registry = StackNestProgressRegistry()
+        let sent = ScriptedSend()
+        let progress = reporter(sent, registry)
+        progress.note(page: 3)
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 1)
+        progress.note(page: 5)
+        progress.flush()
+        progress.close()
+        await progress.waitUntilIdle()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(sent.pages == [3])
+        #expect(sent.attemptCount == 1)
+        #expect(!progress.hasUnsentWork)
+    }
+
+    @Test("flushAllBlocking: 飛んでいるのと同じページが止まっていれば、送り直さず終わりを待つだけ")
+    func blockingFlushDoesNotRepeatTheInFlightPage() async {
+        let registry = StackNestProgressRegistry()
+        let sent = ScriptedSend(slowPage: 1)
+        let progress = reporter(sent, registry)
+        progress.note(page: 1)
+        progress.flush()
+        while sent.attemptCount < 1 { try? await Task.sleep(for: .milliseconds(5)) }
+        progress.note(page: 2)
+        progress.note(page: 1)
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 1)
+        #expect(sent.pages == [1])
+        await progress.waitUntilIdle()
+        #expect(sent.attemptCount == 1)
+    }
+
+    @Test("flushAllBlocking: 飛んでいた送信が恒久的な失敗なら、止まっていたページは送らない")
+    func blockingFlushStopsAfterAPermanentInFlightFailure() async {
+        let registry = StackNestProgressRegistry()
+        let sent = ScriptedSend([StackNestViewerError(.unauthorized)], slowPage: 1)
+        let progress = reporter(sent, registry)
+        progress.note(page: 1)
+        progress.flush()
+        while sent.attemptCount < 1 { try? await Task.sleep(for: .milliseconds(5)) }
+        progress.note(page: 2)
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 1)
+        #expect(sent.attemptCount == 1)
+        await progress.waitUntilIdle()
+        #expect(sent.attemptCount == 1)
+        #expect(sent.pages.isEmpty)
+    }
+
+    @Test("flushAllBlocking: 送るものが無ければ 0 を返してすぐ戻る")
+    func blockingFlushWithNothingToSend() {
+        let registry = StackNestProgressRegistry()
+        let start = ContinuousClock.now
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 0)
+        let sent = ScriptedSend()
+        let idle = reporter(sent, registry)
+        let atStart = reporter(sent, registry)
+        atStart.note(page: 0) // 開いたページ（StackNest が知っている）
+        #expect(registry.flushAllBlocking(timeout: .seconds(30)) == 0)
+        #expect(ContinuousClock.now - start < .seconds(1))
+        #expect(sent.attemptCount == 0)
+        withExtendedLifetime((idle, atStart)) {}
+    }
+}
