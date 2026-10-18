@@ -3,5 +3,5 @@
 /// The kit's version. The release check (`Scripts/release.sh`) matches it against the changelog and the tag.
 public enum StackNestViewerKitInfo {
     /// semver の版（`X.Y.Z`）。 / The semantic version (`X.Y.Z`).
-    public static let version = "0.1.0"
+    public static let version = "0.2.0"
 }

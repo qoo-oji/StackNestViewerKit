@@ -53,7 +53,7 @@ The fake server records the requests it receives.
 ## 導入 / Installation
 
 ```swift
-.package(url: "https://github.com/shelfsmith/StackNestViewerKit", .upToNextMinor(from: "0.1.0"))
+.package(url: "https://github.com/shelfsmith/StackNestViewerKit", .upToNextMinor(from: "0.2.0"))
 ```
 
 アプリのターゲットは `StackNestViewerKit`、試験のターゲットは `StackNestViewerKitTesting` に依存する（`StackNestStubServer` の `configuration()` で作ったセッションは

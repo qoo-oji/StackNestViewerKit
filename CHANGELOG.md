@@ -9,6 +9,8 @@ Release notes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
 ### 追加 / Added
 
 - `StackNestBookSession.cachedPageBytes`（キャッシュに持っているページのバイト数）と `bufferedResponseBytes`（受け取り中の本文のバイト数）。ホストのリソースの監視が、セッションのメモリを数えられる。
