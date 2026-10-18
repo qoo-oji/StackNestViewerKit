@@ -11,6 +11,14 @@ import Foundation
 /// path that enforces the host policy, checks expiry, adds the headers, merges identical requests, refuses
 /// redirects and caps response bodies. It is `@unchecked Sendable` because all mutable state is touched only
 /// under one lock, and no caller closure, continuation or delegate is called while holding it.
+///
+/// 恒久的な失敗（`StackNestViewerError.isPermanent`。認証の失敗・ライブラリのロック・本が無いなど）を一度受けたら、
+/// 以後のページ・manifest・表紙（同期の顔も）は要求を出さずに同じ失敗で戻り、先読みの指示は無視する。書き戻しは
+/// これまでどおり要求を出す。
+///
+/// After a permanent failure (`StackNestViewerError.isPermanent`, such as unauthorized, library locked or book
+/// not found), later page, manifest and cover calls (blocking ones too) fail with that same error without a
+/// request, and prefetch instructions are ignored. Progress write-backs still make their request.
 public final class StackNestBookSession: @unchecked Sendable {
     /// セッションの設定。 / Session settings.
     public struct Configuration: Sendable {

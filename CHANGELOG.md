@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 変更 / Changed
+
+- 恒久的な失敗（認証の失敗・ライブラリのロック・本が無いなど）を受けた後のセッションは、ページ・manifest・表紙を要求を出さずに同じ失敗で返す（これまでは先読みだけを止め、ほかは毎回要求を出して同じ失敗を受けていた）。書き戻しはこれまでどおり要求を出す。
+  After a permanent failure (unauthorized, library locked, book not found and so on), a session answers page, manifest and cover calls with that same error without a request (previously only prefetching stopped, and every other call made a request only to get the same failure). Progress write-backs still make their request.
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

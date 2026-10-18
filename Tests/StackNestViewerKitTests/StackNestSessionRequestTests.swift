@@ -91,6 +91,61 @@ struct StackNestSessionRequestTests {
         }
     }
 
+    static let permanentFailureCases: [(StackNestStubServer.Route, StackNestStubServer.Response, StackNestViewerError)] = [
+        (.page(0), .status(401), StackNestViewerError(.unauthorized)),
+        (.manifest, .status(403, headers: ["X-Library-Locked": "1"]), StackNestViewerError(.libraryLocked)),
+        (.manifest, .status(404), StackNestViewerError(.bookNotFound)),
+        (.cover, .status(403), StackNestViewerError(.unauthorized)),
+        (.progress, .status(401), StackNestViewerError(.unauthorized)),
+    ]
+
+    @Test("恒久的な失敗の後のページ・manifest・表紙は、同期の顔も含めて要求を出さずに同じ失敗で戻る。書き戻しは要求を出す",
+          arguments: permanentFailureCases)
+    func permanentFailureIsAnsweredWithoutRequests(route: StackNestStubServer.Route,
+                                                   response: StackNestStubServer.Response,
+                                                   expected: StackNestViewerError) async throws
+    {
+        let stub = StackNestStubServer(pageCount: 3)
+        stub.respond(route, with: response)
+        let session = try makeSession(stub)
+        await #expect(throws: expected) {
+            switch route {
+            case .page(let index): _ = try await session.page(index)
+            case .cover: _ = try await session.cover()
+            case .progress: try await session.postProgress(page: 1)
+            default: _ = try await session.manifest()
+            }
+        }
+        #expect(stub.requests.map(\.route) == [route])
+        await #expect(throws: expected) { try await session.page(1) }
+        await #expect(throws: expected) { try await session.page(7) }
+        await #expect(throws: expected) { try await session.cover(maxWidth: 200) }
+        await #expect(throws: expected) { try await session.manifest() }
+        await #expect(throws: expected) { try await session.manifest(refresh: true) }
+        let reader = StackNestBlockingReader(session: session)
+        let blocking = await onThread { (Result { try reader.page(2) }, Result { try reader.manifest(refresh: true) }) }
+        #expect(throws: expected) { try blocking.0.get() }
+        #expect(throws: expected) { try blocking.1.get() }
+        #expect(stub.requests.map(\.route) == [route], "どれも要求を出さない")
+        // 書き戻しは記録した失敗で止めない（書き戻しの役は自分の送信の失敗で止まる）。
+        stub.respond(.progress, with: .status(200))
+        try await session.postProgress(page: 2)
+        #expect(stub.requests.map(\.route) == [route, .progress])
+    }
+
+    @Test("一時的な失敗（500・つながらない）の後は、次の呼び出しで要求を出し直す")
+    func transientFailureIsRetriedOnTheNextCall() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        stub.respond(.page(0), with: .status(500))
+        stub.respond(.manifest, with: .failure(.cannotConnectToHost))
+        let session = try makeSession(stub)
+        await #expect(throws: StackNestViewerError(.httpStatus, statusCode: 500)) { try await session.page(0) }
+        await #expect(throws: StackNestViewerError(.cannotConnect)) { try await session.manifest() }
+        stub.respond(.page(0), with: .status(200, body: Data([7])))
+        #expect(try await session.page(0).data == Data([7]))
+        #expect(stub.requests.map(\.route) == [.page(0), .manifest, .page(0)])
+    }
+
     @Test("manifest の JSON が読めなければ .invalidResponse")
     func brokenManifest() async throws {
         let stub = StackNestStubServer()
