@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 修正 / Fixed
+
+- `manifest(refresh: true)`（同期の顔も）と、`pages/{n}` の 404 の後の manifest の確かめが、呼ぶ前から飛んでいた manifest の要求に乗らないようにした。乗ると変わる前のページ数を受け取ることがあり、減ったページの 404 が `pageOutOfRange` ではなく `httpStatus(404)` になっていた。`refresh` を付けない読み出しは、これまでどおり飛んでいる要求に乗る。
+  `manifest(refresh: true)` (on the blocking face too) and the manifest check after a `pages/{n}` 404 no longer join a manifest request that was already in flight before the call. Joining could return the page count from before a change, so a 404 for a removed page was reported as `httpStatus(404)` instead of `pageOutOfRange`. Reads without `refresh` still join a request in flight.
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

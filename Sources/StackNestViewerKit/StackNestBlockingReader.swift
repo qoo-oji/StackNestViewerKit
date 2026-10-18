@@ -30,15 +30,17 @@ public struct StackNestBlockingReader: Sendable {
         self.onMisuse = onMisuse
     }
 
-    /// manifest（同期）。閉じた後は、覚えた manifest があっても、要求なしで `CancellationError`。
+    /// manifest（同期）。`refresh` の意味は async の顔と同じ（true なら、呼んだ後に出した要求の答えを返す）。
+    /// 閉じた後は、覚えた manifest があっても、要求なしで `CancellationError`。
     ///
-    /// The manifest, synchronously. After `close()` it throws `CancellationError` without a request,
+    /// The manifest, synchronously. `refresh` means the same as in the async call (with it, the answer comes
+    /// from a request made after the call). After `close()` it throws `CancellationError` without a request,
     /// even if a manifest was already read.
     public func manifest(refresh: Bool = false) throws -> StackNestBookManifest {
         checkCallingThread()
         if !refresh, let cached = session.cachedManifest { return cached }
         return try session.recordManifest(
-            try session.fetchBlocking(.manifest, priority: .display, isCancelled: isCancelled))
+            try session.fetchBlocking(session.manifestKey(fresh: refresh), priority: .display, isCancelled: isCancelled))
     }
 
     /// ページ（同期。`index` は StackNest のページ番号）。範囲外は要求なしで `.pageOutOfRange`（ホストは自分の
@@ -65,9 +67,11 @@ public struct StackNestBlockingReader: Sendable {
                 isCancelled: isCancelled)
             return StackNestPage(data: response.data, contentType: response.contentType)
         } catch is PageNotFound {
+            // 404 を受けた後に出した要求で読み直す（前から飛んでいる要求には乗らない）。
             let manifest: Result<StackNestBookManifest, any Error> = Result {
                 try session.recordManifest(
-                    try session.fetchBlocking(.manifest, priority: .display, isCancelled: isCancelled))
+                    try session.fetchBlocking(session.manifestKey(fresh: true), priority: .display,
+                                              isCancelled: isCancelled))
             }
             throw StackNestBookSession.missingPageError(index: index, manifest: manifest)
         }
@@ -122,7 +126,9 @@ extension StackNestBookSession {
         guard index >= 0 else { throw StackNestViewerError(.pageOutOfRange, pageCount: known) }
         if index < known { return }
         if !confirmed {
-            _ = try recordManifest(try fetchBlocking(.manifest, priority: .display, isCancelled: isCancelled))
+            // async の顔と同じく、飛んでいる manifest の要求に乗ってよい（参照ファイルより新しければ足りる）。
+            _ = try recordManifest(try fetchBlocking(manifestKey(fresh: false), priority: .display,
+                                                     isCancelled: isCancelled))
         }
         let current = lock.withLock { state.knownPageCount }
         guard index < current else { throw StackNestViewerError(.pageOutOfRange, pageCount: current) }

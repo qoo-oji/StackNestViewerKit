@@ -10,6 +10,15 @@ extension StackNestBookSession {
         return state.nextTicket
     }
 
+    /// manifest の鍵。`fresh` なら世代を進める（呼んだ後に始めた件の答えだけを使う）。そうでなければ、いまの世代
+    /// （飛んでいる件があれば乗る）。
+    func manifestKey(fresh: Bool) -> RequestKey {
+        lock.withLock {
+            if fresh { state.manifestGeneration += 1 }
+            return .manifest(generation: state.manifestGeneration)
+        }
+    }
+
     // MARK: - 1 本の道
 
     /// すべての要求が通る入口。札が加わる前に抜けていれば（取り消し・時間切れ）、要求を出さずにそのエラーで再開する。
