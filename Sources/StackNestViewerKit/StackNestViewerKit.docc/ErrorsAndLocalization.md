@@ -7,10 +7,13 @@ Handling ``StackNestViewerError`` and the default English and Japanese messages.
 ## コードで分ける / Switching on the Code
 
 エラーは列挙ではなくコードを持つ構造体なので、コードが増えてもホストのコンパイルは壊れない。`default` を必ず書く。
-`isPermanent` は StackNest から開き直すまで直らない失敗。
+`isPermanent` は StackNest から開き直すまで直らない失敗。セッションは恒久的な失敗を一度受けたら、以後のページ・
+manifest・表紙を要求なしで同じ失敗で返す（先読みの指示も無視する。書き戻しだけは要求を出す）。
 
 The error is a struct with a code, so new codes don't break the host's build. Always include `default`.
-`isPermanent` marks failures that last until the book is opened from StackNest again.
+`isPermanent` marks failures that last until the book is opened from StackNest again. Once a session has received
+a permanent failure, later page, manifest and cover calls fail with that same error without a request (prefetch
+instructions are ignored too; only progress write-backs still make their request).
 
 ```swift
 import StackNestViewerKit

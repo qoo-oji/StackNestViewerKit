@@ -60,13 +60,18 @@ extension StackNestBookSession {
     }
 
     /// 要求を出す前の検査。閉じた後のページ・manifest・表紙は取り消し、つないでよいホストでなければ
-    /// `.hostNotAllowed`、期限を過ぎていれば `.expired`（読む途中にも切れるので毎回見る）。
+    /// `.hostNotAllowed`、期限を過ぎていれば `.expired`（読む途中にも切れるので毎回見る）。恒久的な失敗を
+    /// 受けた後のページ・manifest・表紙は、要求を出さずにその失敗を返す（StackNest から開き直すまで同じ答えに
+    /// なるので、問い直しても StackNest とビューアの手間が増えるだけ）。書き戻しは止めない: 書き戻しの役は自分の
+    /// 送信の失敗で止まり（`StackNestProgressReporter`）、ホストが直に送る分はホストに任せる（閉じた後も受け付ける
+    /// のと同じ扱い）。
     func preflightFailureLocked(for key: RequestKey, now: Date) -> (any Error)? {
         if state.isClosed, !key.isProgress { return CancellationError() }
         guard configuration.allowedHosts.allows(reference.bookURL) else {
             return StackNestViewerError(.hostNotAllowed)
         }
         guard !reference.isExpired(at: now) else { return StackNestViewerError(.expired) }
+        if !key.isProgress, let failure = state.permanentFailure { return failure }
         return nil
     }
 
@@ -164,7 +169,8 @@ extension StackNestBookSession {
         }
     }
 
-    /// 件の結果を待つ人すべてに渡す。ページはキャッシュへ、恒久的な失敗は記録して先読みを止める。
+    /// 件の結果を待つ人すべてに渡す。ページはキャッシュへ、恒久的な失敗は記録して先読みと以後のページ・manifest・
+    /// 表紙の要求を止める（`preflightFailureLocked`）。
     func finish(_ key: RequestKey, serial: UInt64, with result: Result<FetchedResponse, any Error>) {
         let now = configuration.now()
         var effects = Effects()

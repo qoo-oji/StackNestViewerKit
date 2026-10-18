@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 変更 / Changed
+
+- 恒久的な失敗（認証の失敗・ライブラリのロック・本が無いなど）を受けた後のセッションは、ページ・manifest・表紙を要求を出さずに同じ失敗で返す（これまでは先読みだけを止め、ほかは毎回要求を出して同じ失敗を受けていた）。書き戻しはこれまでどおり要求を出す。
+  After a permanent failure (unauthorized, library locked, book not found and so on), a session answers page, manifest and cover calls with that same error without a request (previously only prefetching stopped, and every other call made a request only to get the same failure). Progress write-backs still make their request.
+
 ### 修正 / Fixed
 
 - 2xx でない応答を、本文の大きさより先に状態コードで振り分けるようにした。大きな本文を申告した（または送ってきた）401・403・404 などが、一時的な `responseTooLarge` になっていた（認証の失敗や本が無いことが伝わらず、先読みも止まらなかった）。2xx でない応答の本文は受け取らない。
