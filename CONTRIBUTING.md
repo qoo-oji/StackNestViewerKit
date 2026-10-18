@@ -51,6 +51,8 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
    さらに名義の確認（前回の公開のタグからの各コミットの作成者・コミッタが shelfsmith か、`Scripts/accepted-contributors.txt` に
    ある貢献者であること。一覧にはプルリクエストを受け入れた貢献者の GitHub の noreply のアドレスだけを、受け入れたときに足す）、
    `Claude-Session:` の行・内部の印・個人識別子の検査（識別子の一覧が要る）を行う。
+   外部のプルリクエストは merge commit で取り込む（GitHub の squash・rebase のボタンはコミッタを `GitHub <noreply@github.com>` に
+   するので、この検査が止め、一覧にも書けない）。一覧を変えるのは保守する人だけ（shelfsmith 以外のコミットが一覧を変えていると止まる）。
    公開済みのタグのコミットが手元に無いと言われたら `git fetch --tags` を実行する。
    Run `Scripts/release.sh X.Y.Z`. It only checks; it never tags or pushes. It requires `core.hooksPath` to be
    `Scripts/githooks`, a clean working tree, the changelog heading and `StackNestViewerKitInfo.version` to be X.Y.Z,
@@ -59,6 +61,9 @@ grep -v '^[[:space:]]*#' ~/.config/stacknest/private-identifiers | grep -q . && 
    `Scripts/accepted-contributors.txt`; when merging a pull request, add only that contributor's GitHub noreply
    address there) and runs the
    `Claude-Session:` trailer, internal-marker and personal-identifier checks (the identifier list must exist).
+   Merge outside pull requests with a merge commit (GitHub's squash and rebase buttons make the committer
+   `GitHub <noreply@github.com>`, which this check refuses and the list cannot hold). Only the maintainer changes
+   the list (the check fails if a commit not by shelfsmith changed it).
    If it says the published tag's commit isn't here, run `git fetch --tags`.
 5. 作者の許可のもとで main を push する。
    With the author's permission, push main.

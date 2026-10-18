@@ -210,6 +210,46 @@ class ReleaseScriptTests(unittest.TestCase):
                 self.accept(entry)
                 self.refused("Name <email>")
 
+    def test_refuses_a_list_entry_with_an_uppercase_domain(self):
+        self.accept("contributor <1+contributor@USERS.NOREPLY.GITHUB.COM>")
+        self.refused("noreply")
+
+    def test_refuses_a_list_line_with_a_double_space_or_a_tab(self):
+        for entry in ["contributor  <1+contributor@users.noreply.github.com>",
+                      "contributor\t<1+contributor@users.noreply.github.com>"]:
+            with self.subTest(entry=entry):
+                self.accept(entry)
+                self.refused("Name <email>")
+
+    def test_refuses_a_listed_email_with_another_name(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        self.contribute({**CONTRIBUTOR, "GIT_AUTHOR_NAME": "renamed"})
+        self.refused("shelfsmith")
+
+    def test_refuses_a_shelfsmith_author_with_an_unlisted_committer(self):
+        self.accept("contributor <1+contributor@users.noreply.github.com>")
+        commit = self.contribute({"GIT_COMMITTER_NAME": "other", "GIT_COMMITTER_EMAIL": "2+other@users.noreply.github.com"})
+        self.refused(commit)
+
+    def test_refuses_a_list_edit_that_is_not_by_shelfsmith(self):
+        (self.repo / "Scripts/accepted-contributors.txt").write_text("contributor <1+contributor@users.noreply.github.com>\n")
+        self.commit("Accept myself", env={**self.env, **CONTRIBUTOR})
+        commit = self.git("rev-parse", "--short", "HEAD").strip()
+        result = self.refused("changed Scripts/accepted-contributors.txt")
+        self.assertIn(commit, result.stderr)
+
+    def test_refuses_a_list_edit_brought_in_by_a_merge(self):
+        self.git("checkout", "-q", "-b", "outside")
+        (self.repo / "Scripts/accepted-contributors.txt").write_text("contributor <1+contributor@users.noreply.github.com>\n")
+        self.commit("Accept myself", env={**self.env, **CONTRIBUTOR})
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "Merge outside", "outside")
+        self.refused("changed Scripts/accepted-contributors.txt")
+
+    def test_refuses_shelfsmith_in_the_list(self):
+        self.accept("shelfsmith <290546180+shelfsmith@users.noreply.github.com>")
+        self.refused("never listed")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,9 @@ def accepted_contributors(text):
         if not local or "@" in local:
             raise CheckError(f"{CONTRIBUTORS} の {number} 行目は GitHub の noreply のアドレスではありません / "
                              f"Line {number} of {CONTRIBUTORS} isn't a GitHub noreply address")
+        if name.casefold() == IDENTITY[0].casefold():
+            raise CheckError(f"{CONTRIBUTORS} の {number} 行目は shelfsmith です（持ち主の名義は一覧に書かない） / "
+                             f"Line {number} of {CONTRIBUTORS} names shelfsmith, which is never listed")
         accepted.add((name, email))
     return accepted
 
@@ -122,6 +125,13 @@ def main():
         else:
             since = ["HEAD"]
         # 一覧は HEAD のものを読む（作業ツリーはクリーンであることを確かめ済み）。無ければ shelfsmith だけを認める。
+        # 一覧を変えたコミット（merge で入った変更も含む）は、作成者・コミッタとも shelfsmith でなければならない。
+        # 貢献者が自分を一覧に足すプルリクエストを、気づかずに受け入れても通らないようにする。
+        for line in git("log", "--full-history", "--format=%h%x09%an%x09%ae%x09%cn%x09%ce", "HEAD", "--", CONTRIBUTORS).splitlines():
+            commit, name, email, committer, committer_email = line.split("\t")
+            if (name, email) != IDENTITY or (committer, committer_email) != IDENTITY:
+                raise CheckError(f"コミット {commit} が {CONTRIBUTORS} を変えていますが、作成者・コミッタが shelfsmith ではありません / "
+                                 f"Commit {commit} changed {CONTRIBUTORS} but isn't authored and committed by shelfsmith")
         if git("ls-tree", "--name-only", "HEAD", "--", CONTRIBUTORS).strip():
             allowed = {IDENTITY} | accepted_contributors(git("show", f"HEAD:{CONTRIBUTORS}"))
         else:
