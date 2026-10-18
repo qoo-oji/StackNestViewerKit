@@ -22,6 +22,8 @@ Release notes.
   Responses that announce `Content-Length` now allocate that size (up to `maxResponseBytes`) before the body arrives, avoiding repeated reallocation (briefly close to twice the size) and leftover capacity while large pages are received.
 - `pageCacheBytes` の半分を超えるページは持たれず、読むたびに取り直されることを説明に書いた（既定では 32 MiB を超え 64 MiB までのページ）。
   Documented that pages larger than half of `pageCacheBytes` are never kept and are fetched again on every read (with the defaults, pages over 32 MiB and up to 64 MiB).
+- セッションは、`book` のパスが StackNest の書く形（`/api/v1/libraries/<library>/books/<id>` と `/api/v1/relay/<relayID>`）のときだけ要求を出し、ほかは要求を出さずに `invalidReference` で断る（`init(contentsOf:)` は開く時点で断る）。書き換えた参照ファイルで、鍵の付いた要求を 127.0.0.1 の別のサービスへ送らせないため。ほかの形の基点へつなぐホストは `Configuration.allowsAnyBookPath` で外せる。
+  A session makes requests only when the `book` path has one of the shapes StackNest writes (`/api/v1/libraries/<library>/books/<id>` and `/api/v1/relay/<relayID>`), and otherwise fails with `invalidReference` without a request (`init(contentsOf:)` refuses when opening), so a tampered reference file can't send token-carrying requests to another service on 127.0.0.1. Hosts that connect to a base of another shape can turn this off with `Configuration.allowsAnyBookPath`.
 
 ### 修正 / Fixed
 

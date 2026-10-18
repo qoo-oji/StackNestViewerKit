@@ -168,6 +168,8 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
 ## セキュリティ / Security
 
 - つなぐのは既定で `127.0.0.1` と `::1` だけ。リダイレクトには付いて行かず、鍵は `book` の宛先にだけ送る。
+- 要求を出すのは、`book` のパスが StackNest の書く形（`/api/v1/libraries/…/books/…`・`/api/v1/relay/…`）のときだけ
+  （127.0.0.1 の別のサービスへ鍵を送らない。`allowsAnyBookPath` で外せる）。
 - プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵がプロキシへ渡ることはない。
 - 鍵はメモリの中だけ。`StackNestBookReference` は `Codable` ではなく、説明・`dump` では伏せる。
 - 本文は 64 MiB まで、期限は要求のたびに確かめ、`URLSession` はキャッシュ・クッキー・資格情報の保管を持たない。
@@ -179,6 +181,8 @@ The same code is compiled by the tests and by the host-mode checks in `Samples`.
   [English](Documentation/BookReferenceFormat.en.md)）。
 
 - Connects only to `127.0.0.1` and `::1` by default; refuses redirects; sends the token only to the `book` origin.
+- Makes requests only when the `book` path has a shape StackNest writes (`/api/v1/libraries/…/books/…` or
+  `/api/v1/relay/…`), so the token never goes to another service on 127.0.0.1 (`allowsAnyBookPath` turns this off).
 - Never uses a proxy (system and PAC proxies are disabled), so the token can't reach one.
 - Keeps the token in memory only; `StackNestBookReference` isn't `Codable` and redacts the token.
 - Caps bodies at 64 MiB, checks expiry before every request, and uses no cache, cookie or credential storage.

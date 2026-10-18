@@ -55,6 +55,18 @@ public final class StackNestBookSession: @unchecked Sendable {
         public var maxConcurrentPrefetches = 2
         /// つないでよいホスト（既定は loopback だけ）。 / Hosts the session may connect to (loopback only by default).
         public var allowedHosts: StackNestHostPolicy = .loopbackOnly
+        /// `book` のパスの形を問わないか。既定（false）では、StackNest が書く形（`/api/v1/libraries/<library>/books/<id>`
+        /// と `/api/v1/relay/<relayID>`。区切りは英数字と `-._~` だけ・末尾のスラッシュは 1 つまで）のときだけ要求を出し、
+        /// ほかは要求なしで `.invalidReference`（書き換えた参照ファイルで、鍵の付いた要求を 127.0.0.1 の別のサービスへ
+        /// 送らせないため）。ほかの形の基点へホストが承知でつなぐときだけ true にする（`allowedHosts` の制限は残る）。
+        ///
+        /// Whether any `book` path is accepted. By default (false) the session makes requests only when the path has
+        /// one of the shapes StackNest writes (`/api/v1/libraries/<library>/books/<id>` and `/api/v1/relay/<relayID>`,
+        /// with segments of letters, digits and `-._~` only and at most one trailing slash) and fails with
+        /// `.invalidReference` without a request otherwise, so a tampered reference file can't send token-carrying
+        /// requests to another service on 127.0.0.1. Set it to true only when the app knowingly connects to a base
+        /// of another shape (`allowedHosts` still applies).
+        public var allowsAnyBookPath = false
         /// 名乗り（nil なら `Bundle.main` から。`format=` は常に参照ファイルの版）。
         ///
         /// The identification (nil means `Bundle.main`; `format=` is always the reference file's version).
@@ -106,15 +118,20 @@ public final class StackNestBookSession: @unchecked Sendable {
     }
 
     /// 参照ファイルを**呼び出したスレッドで同期に**読んで作る（数百バイト・上限 1 MiB）。応答しないボリュームの上に
-    /// あるかもしれないなら、ブロックしてよいスレッドで作る。`allowedHosts` に入らない `book` は `.hostNotAllowed`。
+    /// あるかもしれないなら、ブロックしてよいスレッドで作る。`allowedHosts` に入らない `book` は `.hostNotAllowed`、
+    /// パスが StackNest の書く形でない `book` は（`allowsAnyBookPath` でなければ）`.invalidReference`。
     ///
     /// Reads the reference file **synchronously on the calling thread** (a few hundred bytes, at most 1 MiB).
     /// Create it on a thread that may block if the file could be on an unresponsive volume. Throws
-    /// `.hostNotAllowed` when `book` isn't an allowed host.
+    /// `.hostNotAllowed` when `book` isn't an allowed host, and `.invalidReference` when its path isn't one of the
+    /// shapes StackNest writes (unless `allowsAnyBookPath` is set).
     public convenience init(contentsOf referenceFile: URL, configuration: Configuration = .init()) throws {
         let reference = try StackNestBookReference.load(contentsOf: referenceFile)
         guard configuration.allowedHosts.allows(reference.bookURL) else {
             throw StackNestViewerError(.hostNotAllowed)
+        }
+        guard configuration.allowsAnyBookPath || StackNestBookPath.isStackNestShape(reference.bookURL) else {
+            throw StackNestViewerError(.invalidReference)
         }
         self.init(reference: reference, configuration: configuration)
     }
