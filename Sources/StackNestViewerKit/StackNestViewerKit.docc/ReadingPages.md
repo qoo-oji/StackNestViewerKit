@@ -10,11 +10,15 @@ Pages, prefetching, smaller images, the cache and decoding slots.
 ことがあり、中継されたリモートの本では、`maxWidth` を付けない（または 1600 の）とき、幅が 1600 ピクセルを超える
 ページは長い辺が 1600 ピクセル以内に縮んで JPEG で届く。形式は `contentType` か中身で見る。同じページの同時の要求は
 1 件にまとまり、直近のページ（既定 8 枚・合計 64 MiB。1 枚が合計の半分を超えるページは持たない）はメモリに持つ。
+持たないページは読むたびに取り直す。既定では、32 MiB を超え `maxResponseBytes`（既定 64 MiB）までのページがそうなる。
+そういうページのある本を読むなら `pageCacheBytes` を上げる。
 
 ``StackNestBookSession/page(_:maxWidth:priority:)`` returns the bytes and the `Content-Type`. Pages may be JPEG,
 PNG or WebP; check the format by `contentType` or the bytes. For relayed remote books, when `maxWidth` is omitted (or 1600), pages wider than 1600 pixels arrive
 scaled so the longer side is at most 1600 pixels, as JPEG. Concurrent requests for the same page share one request,
 and recent pages (8 pages and 64 MiB in total by default; a page larger than half of that isn't kept) stay in memory.
+A page that isn't kept is fetched again on every read; with the defaults that means pages over 32 MiB and up to
+`maxResponseBytes` (64 MiB by default). Raise `pageCacheBytes` for books with such pages.
 
 本のページ数は開いた後に変わることがある。``StackNestBookSession/manifest(refresh:)`` に `refresh: true` を渡すと、
 呼んだ後に出した要求の答えを返す（その前から飛んでいる manifest の要求には乗らない）。`pages/{n}` の 404 の後の

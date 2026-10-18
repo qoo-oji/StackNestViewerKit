@@ -500,3 +500,56 @@ struct StackNestSessionRequestTests {
         #expect(await waitUntil { delegateRef.isReleased }, "invalidateAndCancel で delegate が手放される")
     }
 }
+
+@Suite("受け皿の単体")
+struct ResponseSinkTests {
+    private func response(status: Int = 200, contentLength: String?) -> HTTPURLResponse {
+        HTTPURLResponse(url: URL(string: "http://127.0.0.1:51234/")!, statusCode: status, httpVersion: "HTTP/1.1",
+                        headerFields: contentLength.map { ["Content-Length": $0] } ?? [:])!
+    }
+
+    @Test("Content-Length の申告が上限以下なら、その大きさを先に確保する（申告が無い・0・上限超えは確保しない）")
+    func reservesTheAnnouncedLength() {
+        let cases: [(String?, Bool, Int)] = [("600", true, 600), ("1000", true, 1000), ("1001", false, 0),
+                                             (nil, true, 0), ("0", true, 0)]
+        for (length, accepted, reserved) in cases {
+            let sink = ResponseSink(limit: 1000) { _ in }
+            #expect(sink.receive(response(contentLength: length)) == accepted, "\(length ?? "nil")")
+            #expect(sink.reservedCapacityForTesting == reserved, "\(length ?? "nil")")
+        }
+    }
+
+    @Test("確保しても本文はそのまま組み上がり、上限は受け取った量で見る（申告より多く届いた分も）")
+    func reservedBodyIsAssembledAndStillCapped() {
+        let outcome = OutcomeBox()
+        let sink = ResponseSink(limit: 1000) { outcome.set($0) }
+        #expect(sink.receive(response(contentLength: "300")))
+        #expect(sink.append(Data(repeating: 1, count: 200)))
+        #expect(sink.append(Data(repeating: 2, count: 100)))
+        sink.complete(error: nil)
+        #expect(outcome.value?.data == Data(repeating: 1, count: 200) + Data(repeating: 2, count: 100))
+
+        let overflow = ResponseSink(limit: 1000) { _ in }
+        #expect(overflow.receive(response(contentLength: "300")))
+        #expect(overflow.append(Data(count: 1000)))
+        #expect(!overflow.append(Data(count: 1)), "申告より多く届いても、上限を超えたら断る")
+    }
+
+    @Test("申告どおりの大きなページも、セッションを通してそのまま届く")
+    func announcedPageArrivesIntact() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let body = Data((0..<50_000).map { UInt8(truncatingIfNeeded: $0) })
+        stub.respond(.page(1), with: .status(200, headers: ["Content-Length": "\(body.count)", "Content-Type": "image/jpeg"],
+                                             body: body))
+        let session = try makeSession(stub)
+        #expect(try await session.page(1) == StackNestPage(data: body, contentType: "image/jpeg"))
+    }
+}
+
+/// 完了の結果を受け取る箱（完了の閉包は `@Sendable`）。
+final class OutcomeBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: ResponseSink.Outcome?
+    func set(_ outcome: ResponseSink.Outcome) { lock.withLock { stored = outcome } }
+    var value: ResponseSink.Outcome? { lock.withLock { stored } }
+}

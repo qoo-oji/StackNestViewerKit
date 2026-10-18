@@ -33,15 +33,23 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// It bounds each request, not the whole call (a page read can make up to three requests).
         public var waitLimit: Duration = .seconds(25)
         /// 1 応答の本文の上限（超えたら `.responseTooLarge`）。2xx でない応答は状態コードで振り分け、本文は受け取らない。
+        /// 2xx の応答で `Content-Length` の申告があれば、その大きさ（この上限まで）を受け取る前に確保する。
+        /// 受け取れても、`pageCacheBytes` の半分を超えるページは持っておかない。
         ///
         /// The body size limit of one response (`.responseTooLarge` beyond it). Non-2xx responses are classified by
-        /// their status code and their bodies are never read.
+        /// their status code and their bodies are never read. When a 2xx response announces `Content-Length`, that
+        /// much (up to this limit) is allocated before the body arrives. A page that fits this limit but is larger
+        /// than half of `pageCacheBytes` is still not kept.
         public var maxResponseBytes = 64 << 20
         /// 持っておくページの枚数。 / How many pages to keep in memory.
         public var pageCacheCount = 8
-        /// 持っておくページの合計の大きさ（1 枚が半分を超えるページは持たない）。
+        /// 持っておくページの合計の大きさ。1 枚がこの半分を超えるページは持たず、読むたびに取り直す（1 枚でほかの
+        /// ページを全部追い出さないため）。既定の組み合わせ（これと `maxResponseBytes` がどちらも 64 MiB）では、
+        /// 32 MiB を超え 64 MiB までのページは受け取れるが持っておかれない。そういうページのある本を読むなら上げる。
         ///
-        /// The memory budget for kept pages (a page larger than half of it isn't kept).
+        /// The memory budget for kept pages. A page larger than half of it isn't kept and is fetched again on every
+        /// read (so one page can't push out all the others). With the defaults (this and `maxResponseBytes` both
+        /// 64 MiB), pages over 32 MiB and up to 64 MiB are accepted but never kept; raise this for books with such pages.
         public var pageCacheBytes = 64 << 20
         /// 先読みの同時の数。 / How many prefetches run at once.
         public var maxConcurrentPrefetches = 2
