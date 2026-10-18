@@ -80,6 +80,26 @@ func pageDidChange(to page: Int, session: StackNestBookSession, pageCount: Int) 
 }
 ```
 
+## 同時の要求 / Concurrent Requests
+
+セッションが同時に出す要求は ``StackNestBookSession/Configuration-swift.struct/maxConcurrentRequests``（既定 6）まで。
+多くのスレッドから一度に `page(_:)` を呼んでも、残りはセッションの中の列で待ち、枠が空くと書き戻し → 表示の要求が
+乗っている件 → 先読みだけの件の順に出る（同じ組の中は来た順。列で待つ先読みの件に表示の要求が乗れば前へ出る）。
+`URLSession` の宛先ごとの接続の数も同じ値にするので、`URLSession` の中で待つことはない（そこでは優先度は目安に
+しかならず、表示の要求が先読みの後ろで待たされうる）。列で待つ間も `waitLimit` は進み、待つ人が誰もいなくなった件は
+要求を出さずに外れる。遅い中継の本で一度に多くのページを頼むと、後の方は StackNest へ届かないまま `cannotConnect`
+で戻ることがある。いま見せるページから頼む。
+
+A session has at most ``StackNestBookSession/Configuration-swift.struct/maxConcurrentRequests`` (6 by default)
+requests in flight. When many threads call `page(_:)` at once, the rest wait in the session's own queue and start as
+slots free up: progress write-backs first, then fetches a display request is waiting for, then prefetch-only fetches
+(first come, first served within each group; a queued prefetch that a display request joins moves ahead).
+`URLSession`'s per-host connection limit is set to the same value, so nothing waits inside `URLSession`, where
+priority is only a hint and display requests could be stuck behind prefetches. `waitLimit` keeps running while a
+request is queued, and a queued fetch whose waiters all leave is dropped without a request. When a slow relayed
+book is asked for many pages at once, the later ones can fail with `cannotConnect` without reaching StackNest, so
+ask for the pages being shown first.
+
 ## 解読の枠 / Decoding Slots
 
 部品はホストの画像の解読の枠を知らない。ホストは**バイト列を取り終えてから**枠を取る（網の待ちで枠を握らない）。

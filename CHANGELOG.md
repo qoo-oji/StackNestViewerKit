@@ -13,6 +13,8 @@ Release notes.
 
 - `StackNestBookSession.cachedPageBytes`（キャッシュに持っているページのバイト数）と `bufferedResponseBytes`（受け取り中の本文のバイト数）。ホストのリソースの監視が、セッションのメモリを数えられる。
   `StackNestBookSession.cachedPageBytes` (bytes of pages kept in the cache) and `bufferedResponseBytes` (body bytes of responses still arriving), so host resource monitors can account for a session's memory.
+- `StackNestBookSession.Configuration.maxConcurrentRequests`（既定 6）。セッションが同時に出す要求の上限。
+  `StackNestBookSession.Configuration.maxConcurrentRequests` (6 by default), the most requests a session has in flight at once.
 
 ### 変更 / Changed
 
@@ -24,6 +26,8 @@ Release notes.
   Documented that pages larger than half of `pageCacheBytes` are never kept and are fetched again on every read (with the defaults, pages over 32 MiB and up to 64 MiB).
 - セッションは、`book` のパスが StackNest の書く形（`/api/v1/libraries/<library>/books/<id>` と `/api/v1/relay/<relayID>`）のときだけ要求を出し、ほかは要求を出さずに `invalidReference` で断る（`init(contentsOf:)` は開く時点で断る）。書き換えた参照ファイルで、鍵の付いた要求を 127.0.0.1 の別のサービスへ送らせないため。ほかの形の基点へつなぐホストは `Configuration.allowsAnyBookPath` で外せる。
   A session makes requests only when the `book` path has one of the shapes StackNest writes (`/api/v1/libraries/<library>/books/<id>` and `/api/v1/relay/<relayID>`), and otherwise fails with `invalidReference` without a request (`init(contentsOf:)` refuses when opening), so a tampered reference file can't send token-carrying requests to another service on 127.0.0.1. Hosts that connect to a base of another shape can turn this off with `Configuration.allowsAnyBookPath`.
+- セッションは同時に出す要求を `maxConcurrentRequests` までに絞り、残りを自分の列で待たせて、書き戻し → 表示の要求 → 先読みの順に出す（列で待つ先読みに表示の要求が乗れば前へ出る。待つ人がいなくなった件は要求を出さずに外す）。`URLSession` の宛先ごとの接続の数も同じ値にする。これまでは要求をすべてすぐ `URLSession` へ渡していたので、多くのスレッドから一度にページを頼むと、宛先ごとの接続の数（macOS の既定 6）を超えた分が `URLSession` の中で待ち、表示の要求が先読みの後ろで時間切れになったり、遅い中継では StackNest へ届かないまま `cannotConnect` で戻ったりした。
+  A session now keeps at most `maxConcurrentRequests` requests in flight; the rest wait in its own queue and start in this order: progress write-backs, display requests, prefetches (a queued prefetch that a display request joins moves ahead, and a queued fetch whose waiters all leave is dropped without a request). `URLSession`'s per-host connection limit is set to the same value. Previously every request went to `URLSession` at once, so when many threads asked for pages together, those beyond the per-host limit (6 by default on macOS) waited inside `URLSession`, where display requests could time out behind prefetches, or, with a slow relay, fail with `cannotConnect` without ever reaching StackNest.
 
 ### 修正 / Fixed
 

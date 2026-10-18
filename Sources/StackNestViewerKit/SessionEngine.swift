@@ -33,7 +33,7 @@ extension StackNestBookSession {
             }
             admitLocked(key, priority: priority, ticket: ticket, waiter: waiter, now: now, effects: &effects)
             // 表示の要求が先読みの件に乗ると、その件は先読みの枠を使わなくなる（次の先読みを始められる）。
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
     }
@@ -59,7 +59,8 @@ extension StackNestBookSession {
             state.nextSerial += 1
             flight = Flight(key: key, serial: state.nextSerial)
             state.flights[key] = flight
-            effects.launches.append(flight)
+            // すぐには出さず列に並べる（出すのは `startQueuedFlightsLocked`。枠が空いていれば同じ周で出る）。
+            state.queuedFlights.append(flight)
         }
         flight.waiters[ticket] = WaiterEntry(waiter: waiter, priority: priority)
         state.tickets[ticket] = .registered(key)
@@ -95,6 +96,13 @@ extension StackNestBookSession {
         state.flights.values.filter(\.countsAsPrefetch).count
     }
 
+    /// 帳簿が変わった後に必ず呼ぶ: 先読みの枠が空いていれば先読みの件を作り、同時の数の枠が空いていれば
+    /// 並んでいる件を出す。
+    func advanceLocked(now: Date, effects: inout Effects) {
+        startQueuedPrefetchesLocked(now: now, effects: &effects)
+        startQueuedFlightsLocked(effects: &effects)
+    }
+
     /// 枠が空いていれば、指示の順に先読みを始める。
     func startQueuedPrefetchesLocked(now: Date, effects: inout Effects) {
         let limit = max(configuration.maxConcurrentPrefetches, 0)
@@ -107,6 +115,29 @@ extension StackNestBookSession {
             if state.flights[key] != nil || state.cache.contains(key) { continue }
             let ticket = allocateTicketLocked()
             admitLocked(key, priority: .prefetch, ticket: ticket, waiter: .prefetch, now: now, effects: &effects)
+        }
+    }
+
+    // MARK: - 同時の数
+
+    /// 同時に出す要求の上限（1 未満は 1）。
+    var requestLimit: Int { max(configuration.maxConcurrentRequests, 1) }
+
+    /// 同時の数の枠が空いている分だけ、並んでいる件を出す。出す順は `admissionRank`（書き戻し → 表示 → 先読み）、
+    /// 同じ組の中は作った順。`URLSession` の宛先ごとの接続の数（`httpMaximumConnectionsPerHost`）も同じ値にして
+    /// あるので、出した要求が `URLSession` の中で待たされることはない（そこで待つと、優先度は目安にしかならず、
+    /// 表示の要求が先読みの後ろで時間切れになりうる。待つ人の時計も資源の時間切れも、その間に進む）。
+    func startQueuedFlightsLocked(effects: inout Effects) {
+        state.queuedFlights.removeAll(where: \.isAbandoned)
+        while state.runningSerials.count < requestLimit, !state.queuedFlights.isEmpty {
+            var best = 0
+            for index in state.queuedFlights.indices.dropFirst()
+            where state.queuedFlights[index].admissionRank < state.queuedFlights[best].admissionRank {
+                best = index
+            }
+            let flight = state.queuedFlights.remove(at: best)
+            state.runningSerials.insert(flight.serial)
+            effects.launches.append(flight)
         }
     }
 
@@ -126,7 +157,7 @@ extension StackNestBookSession {
                 return nil
             case .registered?:
                 let removed = removeWaiterLocked(ticket, effects: &effects)
-                startQueuedPrefetchesLocked(now: now, effects: &effects)
+                advanceLocked(now: now, effects: &effects)
                 return removed
             }
         }
@@ -146,6 +177,8 @@ extension StackNestBookSession {
         if flight.waiters.isEmpty {
             flight.isAbandoned = true
             state.flights[key] = nil
+            // まだ出していない件は、要求を出さずに列から外す。
+            state.queuedFlights.removeAll { $0 === flight }
             if let task = flight.task { effects.cancels.append(task) }
         } else {
             flight.task?.priority = flight.desiredPriority
@@ -155,7 +188,8 @@ extension StackNestBookSession {
 
     // MARK: - 要求を出す・受ける
 
-    /// 新しい件の要求を組み立てて出す。出す前に待つ人がいなくなっていたら出さない。
+    /// 新しい件の要求を組み立てて出す（同時の数の枠を取った件だけが来る）。出す前に待つ人がいなくなっていたら出さず、
+    /// 枠を返す（その要求は delegate へ届かないので、完了で返る道が無い）。
     func launch(_ flight: Flight) {
         guard let request = makeRequest(for: flight.key) else {
             finish(flight.key, serial: flight.serial, with: .failure(StackNestViewerError(.invalidReference)))
@@ -179,15 +213,30 @@ extension StackNestBookSession {
         } else {
             delegate.unregister(task)
             task.cancel()
+            releaseSlot(of: flight.serial)
         }
     }
 
+    /// 出さなかった件の枠を返し、次の件を出す。
+    func releaseSlot(of serial: UInt64) {
+        let now = configuration.now()
+        var effects = Effects()
+        lock.withLock {
+            state.runningSerials.remove(serial)
+            advanceLocked(now: now, effects: &effects)
+        }
+        apply(effects)
+    }
+
     /// 件の結果を待つ人すべてに渡す。ページはキャッシュへ、恒久的な失敗は記録して先読みと以後のページ・manifest・
-    /// 表紙の要求を止める（`preflightFailureLocked`）。
+    /// 表紙の要求を止める（`preflightFailureLocked`）。出した要求が終わったので枠を返す（取り消した件の完了も
+    /// ここへ来る。その件はもう表に無いので、枠を返すだけ）。
     func finish(_ key: RequestKey, serial: UInt64, with result: Result<FetchedResponse, any Error>) {
         let now = configuration.now()
         var effects = Effects()
         lock.withLock {
+            state.runningSerials.remove(serial)
+            defer { advanceLocked(now: now, effects: &effects) }
             guard let flight = state.flights[key], flight.serial == serial else { return }
             state.flights[key] = nil
             // Tag the response with its flight's serial so a late recorder can tell old from new.
@@ -208,9 +257,12 @@ extension StackNestBookSession {
                 if let failure = error as? StackNestViewerError, failure.isPermanent {
                     state.permanentFailure = failure
                     state.prefetchQueue.removeAll()
+                    // まだ出していない先読みだけの件も出さない（列から外れる）。
+                    for queued in state.queuedFlights where queued.countsAsPrefetch {
+                        if let ticket = state.prefetchTickets[queued.key] { _ = removeWaiterLocked(ticket, effects: &effects) }
+                    }
                 }
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
         }
         apply(effects)
     }
@@ -295,6 +347,8 @@ extension StackNestBookSession {
     func taskPriorityForTesting(_ key: RequestKey) -> Float? { lock.withLock { state.flights[key]?.task?.priority } }
     var cachedKeysForTesting: [RequestKey] { lock.withLock { state.cache.keys } }
     var ticketCountForTesting: Int { lock.withLock { state.tickets.count } }
+    var queuedKeysForTesting: [RequestKey] { lock.withLock { state.queuedFlights.map(\.key) } }
+    var runningCountForTesting: Int { lock.withLock { state.runningSerials.count } }
     var urlSessionConfigurationForTesting: URLSessionConfiguration { urlSession.configuration }
     var delegateForTesting: AnyObject { delegate }
 }

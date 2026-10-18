@@ -53,6 +53,19 @@ public final class StackNestBookSession: @unchecked Sendable {
         public var pageCacheBytes = 64 << 20
         /// 先読みの同時の数。 / How many prefetches run at once.
         public var maxConcurrentPrefetches = 2
+        /// 同時に出す要求の上限（1 未満は 1）。超えた分はセッションの中の列で待ち、枠が空くと書き戻し → 表示の要求が
+        /// 乗っている件 → 先読みだけの件の順に出す（同じ組の中は来た順。先読みの件に表示の要求が乗れば、その場で前へ
+        /// 出る）。待つ人が誰もいなくなった件は、要求を出さずに列から外す。`URLSession` の宛先ごとの接続の数
+        /// （`httpMaximumConnectionsPerHost`。`makeURLSessionConfiguration` が何を返しても）もこの値にするので、
+        /// 出した要求が `URLSession` の中で待たされることはない。列で待つ間も `waitLimit` は進む。
+        ///
+        /// The most requests in flight at once (values below 1 count as 1). The rest wait in the session's own
+        /// queue and start, as slots free up, in this order: progress write-backs, then fetches a display request
+        /// is waiting for, then prefetch-only fetches (first come, first served within each group; a prefetch that a
+        /// display request joins moves ahead at once). A queued fetch whose waiters all leave is dropped without a
+        /// request. `httpMaximumConnectionsPerHost` is set to the same value (whatever `makeURLSessionConfiguration`
+        /// returns), so no request waits inside `URLSession`. `waitLimit` keeps running while a request is queued.
+        public var maxConcurrentRequests = 6
         /// つないでよいホスト（既定は loopback だけ）。 / Hosts the session may connect to (loopback only by default).
         public var allowedHosts: StackNestHostPolicy = .loopbackOnly
         /// `book` のパスの形を問わないか。既定（false）では、StackNest が書く形（`/api/v1/libraries/<library>/books/<id>`
@@ -110,7 +123,8 @@ public final class StackNestBookSession: @unchecked Sendable {
         let delegate = SessionDelegate()
         self.delegate = delegate
         urlSession = URLSession(
-            configuration: Self.hardened(configuration.makeURLSessionConfiguration(), waitLimit: configuration.waitLimit),
+            configuration: Self.hardened(configuration.makeURLSessionConfiguration(), waitLimit: configuration.waitLimit,
+                                         maxConcurrentRequests: configuration.maxConcurrentRequests),
             delegate: delegate, delegateQueue: nil)
         state = EngineState(
             cache: PageCache(capacity: configuration.pageCacheCount, byteBudget: configuration.pageCacheBytes),
@@ -228,7 +242,7 @@ public final class StackNestBookSession: @unchecked Sendable {
             state.prefetchQueue = wanted.filter {
                 state.prefetchTickets[$0] == nil && state.flights[$0] == nil && !state.cache.contains($0)
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
     }
@@ -249,6 +263,8 @@ public final class StackNestBookSession: @unchecked Sendable {
             state.manifest = nil
             state.prefetchQueue.removeAll()
             state.prefetchTickets.removeAll()
+            // 並んでいる書き戻しは残す（閉じた後も送る）。出している件の枠は、取り消した要求が終わったときに返る。
+            state.queuedFlights.removeAll { !$0.key.isProgress }
             for (key, flight) in state.flights where !key.isProgress {
                 state.flights[key] = nil
                 flight.isAbandoned = true
@@ -352,7 +368,7 @@ public final class StackNestBookSession: @unchecked Sendable {
             for (key, ticket) in state.prefetchTickets where beyond(key) {
                 _ = removeWaiterLocked(ticket, effects: &effects)
             }
-            startQueuedPrefetchesLocked(now: now, effects: &effects)
+            advanceLocked(now: now, effects: &effects)
         }
         apply(effects)
         return manifest
@@ -389,8 +405,11 @@ public final class StackNestBookSession: @unchecked Sendable {
     }
 
     /// キャッシュ・クッキー・資格情報の保管を持たない設定にする（鍵の付いた要求の結果をディスクへ残さない）。
-    /// 1 回の要求の全体の時間（`timeoutIntervalForResource`）を `waitLimit`＋上乗せで絞る。
-    static func hardened(_ host: URLSessionConfiguration, waitLimit: Duration) -> URLSessionConfiguration {
+    /// 1 回の要求の全体の時間（`timeoutIntervalForResource`）を `waitLimit`＋上乗せで絞る。宛先ごとの接続の数は
+    /// セッションの同時の数の上限に合わせる（それより多くは出さないので、`URLSession` の中の列を使わない）。
+    static func hardened(_ host: URLSessionConfiguration, waitLimit: Duration,
+                         maxConcurrentRequests: Int) -> URLSessionConfiguration
+    {
         // Work on a copy: the host's object (possibly shared) stays untouched.
         let configuration = (host.copy() as? URLSessionConfiguration) ?? host
         configuration.urlCache = nil
@@ -403,6 +422,7 @@ public final class StackNestBookSession: @unchecked Sendable {
         // Never use a proxy: an empty dictionary disables system and PAC proxies, so the token goes only to the book origin.
         configuration.connectionProxyDictionary = [:]
         configuration.timeoutIntervalForResource = (waitLimit + resourceTimeoutMargin).timeInterval
+        configuration.httpMaximumConnectionsPerHost = max(maxConcurrentRequests, 1)
         return configuration
     }
 }
