@@ -344,18 +344,19 @@ public final class StackNestBookSession: @unchecked Sendable {
 
     // MARK: - 顔に共通の部分
 
-    /// 読んだ manifest を記録する。より古い件の応答は、呼んだ人には返すが状態には反映しない（通し番号で判定）。
-    /// ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
+    /// 読んだ manifest を記録する。より前に出した件の応答は、呼んだ人には返すが状態には反映しない（出した順の
+    /// 番号で判定）。ページ数が減っていたら、範囲の外になったページをキャッシュ・先読みの列から捨て、
     /// 先読みだけが待っている範囲の外の件は取り消す（以後、範囲の外へは要求を出さない）。
     func recordManifest(_ response: FetchedResponse) throws -> StackNestBookManifest {
         let manifest = try StackNestBookManifest.parse(response.data)
         let now = configuration.now()
         var effects = Effects()
         lock.withLock {
-            // A response from an older flight than the one already applied is returned to its caller
-            // but never overwrites the newer state (serials increase with every flight).
-            guard response.serial > state.manifestSerial else { return }
-            state.manifestSerial = response.serial
+            // A response from a flight launched before the one already applied is returned to its caller
+            // but never overwrites the newer state (launch numbers increase with every launched flight; the
+            // creation serial would not do, since queued flights can launch out of creation order).
+            guard response.launchNumber > state.manifestLaunchNumber else { return }
+            state.manifestLaunchNumber = response.launchNumber
             if !state.isClosed { state.manifest = manifest }
             state.knownPageCount = manifest.pageCount
             state.hasConfirmedPageCount = true

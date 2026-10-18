@@ -213,6 +213,8 @@ extension StackNestBookSession {
             // `URLSession` 自身の列へ渡すだけで delegate を同期に呼ばない（優先度の書き込みと同じ扱い）ので、
             // 「ロックを持ったまま呼び戻さない」の約束は保てる。
             task.resume()
+            state.lastLaunchNumber += 1
+            flight.launchNumber = state.lastLaunchNumber
             return (true, state.launchHookForTesting)
         }
         if started {
@@ -246,10 +248,10 @@ extension StackNestBookSession {
             defer { advanceLocked(now: now, effects: &effects) }
             guard let flight = state.flights[key], flight.serial == serial else { return }
             state.flights[key] = nil
-            // Tag the response with its flight's serial so a late recorder can tell old from new.
+            // Tag the response with its flight's launch number so a late recorder can tell old from new.
             var result = result
             if case .success(var response) = result {
-                response.serial = flight.serial
+                response.launchNumber = flight.launchNumber
                 result = .success(response)
             }
             for (ticket, entry) in flight.waiters {

@@ -20,8 +20,9 @@ enum RequestKey: Hashable, Sendable {
 struct FetchedResponse: Sendable {
     let data: Data
     let contentType: String?
-    /// 応答を返した件の通し番号（`finish` が付ける）。manifest の新旧の順を決める。
-    var serial: UInt64 = 0
+    /// 応答を返した件を出した順の番号（`finish` が付ける）。manifest の新旧の順を決める。件を作った順（通し番号）
+    /// ではなく出した順なのは、件が列で待つので、作った順と StackNest へ出した順が食い違いうるため。
+    var launchNumber: UInt64 = 0
 }
 
 /// `pages/{n}` の 404。顔（async・同期）が manifest を読み直して `.pageOutOfRange` などに振り分ける。外へは出さない。
@@ -76,6 +77,8 @@ final class Flight {
     let key: RequestKey
     let serial: UInt64
     var task: URLSessionDataTask?
+    /// 出した順の番号（`launch` が `resume()` と同じロックの中で付ける。出す前は 0）。
+    var launchNumber: UInt64 = 0
     var waiters: [UInt64: WaiterEntry] = [:]
     /// 待つ人がいなくなって取り消した（まだ出していなければ出さない）。
     var isAbandoned = false
@@ -126,8 +129,11 @@ struct EngineState {
     var manifest: StackNestBookManifest?
     /// manifest の件の世代（読み直しのたびに進む）。
     var manifestGeneration: UInt64 = 0
-    /// 最後に反映した manifest の応答の件の通し番号（古い応答で新しい manifest を上書きしない）。
-    var manifestSerial: UInt64 = 0
+    /// 最後に反映した manifest の応答の件を出した順の番号（先に出した件の応答で、後に出した件の manifest を
+    /// 上書きしない）。
+    var manifestLaunchNumber: UInt64 = 0
+    /// 最後に出した件の、出した順の番号。
+    var lastLaunchNumber: UInt64 = 0
     var isClosed = false
     var permanentFailure: StackNestViewerError?
     /// まだ出していない先読み（指示の順）。
