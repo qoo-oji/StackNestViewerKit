@@ -189,26 +189,49 @@ struct StackNestProgressReporterTests {
         return (page, longestGap)
     }
 
+    /// 前提(合図の間隔がまとめ待ちより短い)が崩れた回は捨てて測り直す回数。CI の遅い機械では、試験の始まりの混み合いで
+    /// ページを送るループが一瞬止まり(0.6〜0.7 秒。macos-15-intel で実測)、前提だけが崩れて試験が落ちることがあった。
+    private static let shortGapAttempts = 5
+
     @Test("ページを送るたびに、まとめ待ちをやり直す")
     func debounceRestartsOnEveryNote() async {
-        let sent = ScriptedSend()
-        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .seconds(60))
-        let (last, longestGap) = await turnPages(progress, for: .seconds(1))
-        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
-        #expect(sent.attemptCount == 0)
-        await progress.waitUntilIdle()
-        #expect(sent.pages == [last])
+        for attempt in 1...Self.shortGapAttempts {
+            let sent = ScriptedSend()
+            let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .seconds(60))
+            let (last, longestGap) = await turnPages(progress, for: .seconds(1))
+            guard longestGap < .milliseconds(500) else {
+                // 前提が崩れた(機械が止まった)回は確かめない。片付けてから測り直す。
+                await progress.waitUntilIdle()
+                if attempt == Self.shortGapAttempts {
+                    Issue.record("前提: 合図の間隔がまとめ待ちより短い(\(Self.shortGapAttempts) 回とも崩れた。最後は \(longestGap))")
+                }
+                continue
+            }
+            #expect(sent.attemptCount == 0)
+            await progress.waitUntilIdle()
+            #expect(sent.pages == [last])
+            return
+        }
     }
 
     @Test("続けてページを送り続けても、まとめ待ちの最長で送る")
     func maxWaitSendsWhileKeepingTurningPages() async {
-        let sent = ScriptedSend()
-        let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .milliseconds(200))
-        let (last, longestGap) = await turnPages(progress, for: .seconds(1))
-        #expect(longestGap < .milliseconds(500), "前提: 合図の間隔がまとめ待ちより短い")
-        #expect(sent.attemptCount >= 1)
-        await progress.waitUntilIdle()
-        #expect(sent.pages.last == last)
+        for attempt in 1...Self.shortGapAttempts {
+            let sent = ScriptedSend()
+            let progress = reporter(sent, debounce: .milliseconds(500), maxWait: .milliseconds(200))
+            let (last, longestGap) = await turnPages(progress, for: .seconds(1))
+            guard longestGap < .milliseconds(500) else {
+                await progress.waitUntilIdle()
+                if attempt == Self.shortGapAttempts {
+                    Issue.record("前提: 合図の間隔がまとめ待ちより短い(\(Self.shortGapAttempts) 回とも崩れた。最後は \(longestGap))")
+                }
+                continue
+            }
+            #expect(sent.attemptCount >= 1)
+            await progress.waitUntilIdle()
+            #expect(sent.pages.last == last)
+            return
+        }
     }
 
     @Test("閉じた後の note は無視する（閉じる間に先頭へ戻っても、保存した位置を上書きしない）")
