@@ -39,11 +39,15 @@ public final class StackNestProgressReporter {
     private var lastSentPage: Int?
     private var debounceTask: Task<Void, Never>?
     private var inFlight: Task<Void, Never>?
+    /// 飛んでいる送信のページと、その終わりをメインスレッドを使わずに知らせる印（`inFlight` と一緒に立て、一緒に外す）。
+    private var inFlightSend: (page: Int, outcome: SendOutcome)?
     private var lastNotice: StackNestViewerError.NoticeKind?
     private var firstPendingAt: ContinuousClock.Instant?
     private var closeDeferred = false
     private var retriedAfterClose = false
     private var isClosed = false
+    /// 送り残しを終了時の送り切り（`StackNestProgressRegistry.flushAllBlocking(timeout:)`）へ渡した後。以後は送らない。
+    private var isHandedOff = false
     /// 恒久的な失敗の後（送らない）。 / True after a permanent failure (nothing more is sent).
     public private(set) var isStopped = false
 
@@ -125,7 +129,13 @@ public final class StackNestProgressReporter {
     }
 
     /// 送っていない・送っている最中の位置があるか。 / Whether a position is waiting or being sent.
-    public var hasUnsentWork: Bool { !isStopped && (pendingPage != nil || debounceTask != nil || inFlight != nil) }
+    /// 終了時の送り切り（`flushAllBlocking(timeout:)`）へ渡した後は、送り切れたかに関わらず false（以後この役は送らない）。
+    ///
+    /// After the work has been handed to the quit-time `flushAllBlocking(timeout:)`, this is false whether or not
+    /// those sends completed (the reporter sends nothing more).
+    public var hasUnsentWork: Bool {
+        !isStopped && !isHandedOff && (pendingPage != nil || debounceTask != nil || inFlight != nil)
+    }
 
     /// まとめ待ちと送信（続けて送る分も）が終わるまで待つ（試験・終了時）。
     ///
@@ -149,23 +159,32 @@ public final class StackNestProgressReporter {
         // まとめ待ちを残さない（取り消さずに外すと、手の届かないタスクが後で早く発火して、失敗で戻したページを送り直す）。
         debounceTask?.cancel()
         debounceTask = nil
-        guard !isStopped, inFlight == nil, let page = pendingPage else { return }
+        guard !isStopped, !isHandedOff, inFlight == nil, let page = pendingPage else { return }
         pendingPage = nil
         firstPendingAt = nil
         guard page != lastSentPage else { return }
         lastSentPage = page
         let send = send
+        let outcome = SendOutcome()
+        inFlightSend = (page, outcome)
+        // 送信そのものはメインアクターの外ですぐ始める。メインアクターのタスクに始めさせると、同じ周で
+        // `flushAllBlocking(timeout:)` がメインスレッドを止めたとき（`close()` の直後に呼ぶなど）、送信が始まらないまま
+        // 上限まで待つことになる。後始末（失敗の扱い・続けて送るページ）は、これまでどおりメインアクターで行う。
+        let sending = Task.detached(priority: Task.currentPriority) {
+            try await Self.send(page, with: send, reportingTo: outcome)
+        }
         // self を強く持つ: 閉じた後（ホストが手放した後）も、飛んでいる送信と続けて送るページを送り切る。
         inFlight = Task { [self] in
             var succeeded = false
             do {
-                try await send(page)
+                try await sending.value
                 succeeded = true
                 lastNotice = nil
             } catch {
                 handle(error, page: page)
             }
             inFlight = nil
+            inFlightSend = nil
             if succeeded {
                 sendPending()
             } else if closeDeferred, !retriedAfterClose, let newer = pendingPage, newer != page {
@@ -173,6 +192,46 @@ public final class StackNestProgressReporter {
                 sendPending()
             }
         }
+    }
+
+    /// 送り先を呼び、終わったことを `outcome` へ知らせる。メインスレッドが止まっていても（終了時の送り切りが
+    /// メインスレッドで待っていても）知らせが届く。
+    nonisolated private static func send(_ page: Int, with send: Send, reportingTo outcome: SendOutcome) async throws {
+        do {
+            try await send(page)
+            outcome.finish(.succeeded)
+        } catch {
+            outcome.finish((error as? StackNestViewerError)?.isPermanent == true ? .stopped : .failed)
+            throw error
+        }
+    }
+
+    /// 終了時の送り切りのために、送り残しを取り出して役を閉じる（`note(page:)` は無視され、以後この役は送らない）。
+    /// 送るものも待つ送信も無ければ nil。
+    ///
+    /// - 止まっているページ（まとめ待ちのものを含む）を送る。ただし StackNest が知っているページ（開いたページ・
+    ///   送れたページ）なら送らない。
+    /// - 送信が飛んでいれば、それを送り直さずに終わりを待ち、止まっているページはその後に送る（古い位置が新しい位置の
+    ///   後に届いて巻き戻すことが無い）。止まっているのが飛んでいるページそのものなら送らない（成功すれば送り直しになり、
+    ///   失敗した送信をここで送り直さないのは `close()` と同じ）。飛んでいた送信が恒久的な失敗なら、後のページも送らない。
+    func takeWorkForBlockingFlush() -> BlockingFlushJob? {
+        guard hasUnsentWork else { return nil }
+        debounceTask?.cancel()
+        debounceTask = nil
+        isClosed = true
+        isHandedOff = true
+        let waiting = pendingPage
+        pendingPage = nil
+        firstPendingAt = nil
+        let flying = inFlight == nil ? nil : inFlightSend
+        let page: Int?
+        if let flying {
+            page = waiting == flying.page ? nil : waiting
+        } else {
+            page = waiting == lastSentPage ? nil : waiting
+        }
+        guard flying != nil || page != nil else { return nil }
+        return BlockingFlushJob(awaiting: flying?.outcome, page: page, send: send)
     }
 
     private func handle(_ error: any Error, page: Int) {
@@ -192,5 +251,56 @@ public final class StackNestProgressReporter {
         guard failure.noticeKind != lastNotice else { return }
         lastNotice = failure.noticeKind
         onFailure(failure)
+    }
+}
+
+/// 1 件の送信の終わり。ロックで守り、待つ人の再開はロックの外で行う。
+final class SendOutcome: @unchecked Sendable {
+    enum Result: Sendable {
+        case succeeded
+        case failed
+        /// 恒久的な失敗（その本へはもう送らない）。
+        case stopped
+    }
+
+    private let lock = NSLock()
+    private var result: Result?
+    private var waiters: [CheckedContinuation<Result, Never>] = []
+
+    func finish(_ result: Result) {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Result, Never>] in
+            guard self.result == nil else { return [] }
+            self.result = result
+            let waiting = waiters
+            waiters = []
+            return waiting
+        }
+        for waiter in waiting { waiter.resume(returning: result) }
+    }
+
+    func value() async -> Result {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Result, Never>) in
+            let known = lock.withLock { () -> Result? in
+                if let result { return result }
+                waiters.append(continuation)
+                return nil
+            }
+            if let known { continuation.resume(returning: known) }
+        }
+    }
+}
+
+/// 終了時の送り切りで 1 つの役が残した仕事: 飛んでいる送信の終わりを待ち、それから止まっていたページを送る。
+/// メインスレッドを使わずに走る（`StackNestProgressRegistry.flushAllBlocking(timeout:)`）。
+struct BlockingFlushJob: Sendable {
+    let awaiting: SendOutcome?
+    let page: Int?
+    let send: StackNestProgressReporter.Send
+
+    /// 失敗は知らせない（終了の途中で、知らせる先の UI がもう無い）。
+    func run() async {
+        if let awaiting, await awaiting.value() == .stopped { return }
+        guard let page else { return }
+        try? await send(page)
     }
 }

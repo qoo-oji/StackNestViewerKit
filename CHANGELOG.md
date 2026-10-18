@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 追加 / Added
+
+- 終了時の送り切り `StackNestProgressRegistry.flushAllBlocking(timeout:)`。送信をメインスレッドの外で走らせて呼んだスレッドで待つので、`applicationShouldTerminate` から呼んで `.terminateNow` を返す。文書の例もこの形に改めた（`flushAll(timeout:completion:)` と `.terminateLater` の組み合わせは、`DispatchQueue.main.async` などメインキューの仕事の中から終了が求められると、アプリが終わらないまま止まる）。
+  `StackNestProgressRegistry.flushAllBlocking(timeout:)` for flushing at quit: it runs the sends off the main thread and waits on the calling thread, so call it from `applicationShouldTerminate` and return `.terminateNow`. The documented example now uses it (pairing `flushAll(timeout:completion:)` with `.terminateLater` hangs the app when termination is requested from inside a main-queue job, such as `DispatchQueue.main.async`).
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

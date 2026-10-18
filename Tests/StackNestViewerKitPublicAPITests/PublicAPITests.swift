@@ -96,6 +96,21 @@ struct PublicAPITests {
         #expect(stub.requests.contains { $0.progressPage == 2 })
     }
 
+    @Test("終了時の送り切り（共有の登録簿・メインスレッドで待つ形）")
+    func blockingQuitFlushThroughTheSharedRegistry() throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        let reporter = StackNestProgressReporter(session: session, startPage: 0) { _ in }
+        // 登録簿は報告役を弱く持つので、検証が終わるまで握っておく。
+        defer { withExtendedLifetime(reporter) {} }
+        reporter.note(page: 2)
+        let registry = StackNestProgressRegistry.shared
+        #expect(registry.hasUnsentWork)
+        #expect(registry.flushAllBlocking(timeout: .seconds(5)) >= 1)
+        #expect(!registry.hasUnsentWork)
+        #expect(stub.requests.contains { $0.progressPage == 2 })
+    }
+
     @Test("画素データが 65,535 バイトを超える PNG も画像として読め、目印が読み戻せる")
     func largePngPageDecodes() throws {
         // stored ブロックは 1 つ 65,535 バイトまでなので、それを超える大きさでブロックの分割が正しいかを見る。

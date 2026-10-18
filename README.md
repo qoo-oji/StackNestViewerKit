@@ -87,15 +87,18 @@ minor release can break the API, so stay within one minor version.
    乗ったら、枠の列でも表示の側へ並べ直す。
    Take a decoding slot after the bytes arrive, and promote joined display requests in your slot queue.
 7. **書き戻し / Progress**: `StackNestProgressReporter` に `note(page:)` を渡し、閉じるときに `close()`。`close()` の後
-   （と、終了時の `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` が報告者を閉じた後）の
-   `note(page:)` は無視される。`applicationShouldTerminate` の例は DocC の「Writing Progress」。`flushAll` は未送信のあった報告者を閉じる。別の処理が
-   終了を取り消したら、閉じた報告者は閉じたままなので、まだ開いている本の報告者を作り直す。
+   （と、終了時の `StackNestProgressRegistry.shared.flushAllBlocking(timeout:)` が報告者を閉じた後）の
+   `note(page:)` は無視される。終了時は `applicationShouldTerminate` から `flushAllBlocking(timeout:)` を呼んで
+   `.terminateNow` を返す（例は DocC の「Writing Progress」）。`flushAll(timeout:completion:)` と `.terminateLater` の
+   組み合わせは、終了がメインキューの仕事の中から求められると止まったままになるので使わない。送り切りは未送信のあった
+   報告者を閉じる。別の処理が終了を取り消したら、閉じた報告者は閉じたままなので、まだ開いている本の報告者を作り直す。
    Pass `note(page:)` to a `StackNestProgressReporter` and call `close()` when done; `note(page:)` after `close()` (or
    after the quit-time flush has closed the reporter) is ignored. At quit, call
-   `StackNestProgressRegistry.shared.flushAll(timeout:completion:)` (from `applicationShouldTerminate`; see "Writing
-   Progress" in the DocC) so the last position is not lost. `flushAll` closes the reporters that had unsent work. If
-   another quit handler vetoes the quit, those reporters stay closed, so create new reporters for the books that are
-   still open.
+   `StackNestProgressRegistry.shared.flushAllBlocking(timeout:)` from `applicationShouldTerminate` and return
+   `.terminateNow` (see "Writing Progress" in the DocC) so the last position is not lost. Don't pair
+   `flushAll(timeout:completion:)` with `.terminateLater`: it hangs when termination is requested from inside a
+   main-queue job. The flush closes the reporters that had unsent work. If another quit handler vetoes the quit, those
+   reporters stay closed, so create new reporters for the books that are still open.
 8. **同期の読み手 / Blocking readers**: 同期の API を持つビューアは、ブロックしてよいスレッドから
    `StackNestBlockingReader` を呼ぶ（メインスレッドや協調スレッドからは呼ばない）。
    If your viewer has a blocking API, call `StackNestBlockingReader` only from a thread that may block (never the main
