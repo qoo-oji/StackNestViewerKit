@@ -54,7 +54,7 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// 先読みの同時の数。 / How many prefetches run at once.
         public var maxConcurrentPrefetches = 2
         /// 同時に出す要求の上限（1 未満は 1）。超えた分はセッションの中の列で待ち、枠が空くと書き戻し → 表示の要求が
-        /// 乗っている件 → 先読みだけの件の順に出す（同じ組の中は来た順。先読みの件に表示の要求が乗れば、その場で前へ
+        /// 乗っている件 → 先読みだけの件の順に出す（同じ組の中は件を作った順。先読みの件に表示の要求が乗れば、その場で前へ
         /// 出る）。待つ人が誰もいなくなった件は、要求を出さずに列から外す。`URLSession` の宛先ごとの接続の数
         /// （`httpMaximumConnectionsPerHost`。`makeURLSessionConfiguration` が何を返しても）もこの値にするので、
         /// 出した要求が `URLSession` の中で待たされることはない。列で待つ間も `waitLimit` は進む。
@@ -63,7 +63,7 @@ public final class StackNestBookSession: @unchecked Sendable {
         ///
         /// The most requests in flight at once (values below 1 count as 1). The rest wait in the session's own
         /// queue and start, as slots free up, in this order: progress write-backs, then fetches a display request
-        /// is waiting for, then prefetch-only fetches (first come, first served within each group; a prefetch that a
+        /// is waiting for, then prefetch-only fetches (within each group, in the order the fetches were created; a prefetch that a
         /// display request joins moves ahead at once). A queued fetch whose waiters all leave is dropped without a
         /// request. `httpMaximumConnectionsPerHost` is set to the same value (whatever `makeURLSessionConfiguration`
         /// returns), so no request waits inside `URLSession`. `waitLimit` keeps running while a request is queued.

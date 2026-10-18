@@ -266,6 +266,8 @@ struct StackNestConcurrencyTests {
         #expect(await gate.arrival())
         // 先読みの 2 件は同じ周で枠を取り、続けて出される。1 件目を出した直後（2 件目を出す前）に、走っている
         // page(0) の 401 を受け取り終えるまで待つ: 2 件目は列から外れた後なので、出す側で止めるしかない。
+        // 協調スレッドの上で Thread.sleep で回して待つ。これが詰まらないのは、試験用のサーバが専用のスレッドで
+        // 応答する（Swift Concurrency の協調プールを要しない）から。サーバの作りを変えるときはここも見直す。
         session.setLaunchHookForTesting { key, _ in
             guard key == .page(index: 1, maxWidth: nil) else { return }
             gate.open()
@@ -281,7 +283,7 @@ struct StackNestConcurrencyTests {
         #expect(session.ticketCountForTesting == 0)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(stub.requestCount(.page(2)) == 0, "恒久的な失敗の後に要求は出ない")
-        #expect(stub.requestCount(.page(1)) <= 1)
+        #expect(stub.requestCount(.page(1)) == 1, "先に出した件は取り消されずに届く")
     }
 }
 
