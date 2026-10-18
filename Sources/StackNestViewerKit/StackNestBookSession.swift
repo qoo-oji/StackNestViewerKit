@@ -58,6 +58,8 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// 出る）。待つ人が誰もいなくなった件は、要求を出さずに列から外す。`URLSession` の宛先ごとの接続の数
         /// （`httpMaximumConnectionsPerHost`。`makeURLSessionConfiguration` が何を返しても）もこの値にするので、
         /// 出した要求が `URLSession` の中で待たされることはない。列で待つ間も `waitLimit` は進む。
+        /// `maxConcurrentPrefetches` より大きく保つ（差の分が表示の要求に残る）。走っている先読みは追い越せないので、
+        /// 同じか小さいと、表示の要求が先読みの終わりを待つことがある。
         ///
         /// The most requests in flight at once (values below 1 count as 1). The rest wait in the session's own
         /// queue and start, as slots free up, in this order: progress write-backs, then fetches a display request
@@ -65,6 +67,9 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// display request joins moves ahead at once). A queued fetch whose waiters all leave is dropped without a
         /// request. `httpMaximumConnectionsPerHost` is set to the same value (whatever `makeURLSessionConfiguration`
         /// returns), so no request waits inside `URLSession`. `waitLimit` keeps running while a request is queued.
+        /// Keep it larger than `maxConcurrentPrefetches`: the difference is what stays free for display requests.
+        /// A running prefetch can't be overtaken, so with an equal or smaller value a display request may wait for
+        /// prefetches to finish.
         public var maxConcurrentRequests = 6
         /// つないでよいホスト（既定は loopback だけ）。 / Hosts the session may connect to (loopback only by default).
         public var allowedHosts: StackNestHostPolicy = .loopbackOnly
@@ -85,10 +90,12 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// The identification (nil means `Bundle.main`; `format=` is always the reference file's version).
         public var identification: StackNestViewerIdentification? = nil
         /// `URLSession` の設定を作る口（試験の見立てを差し込む）。キャッシュ・クッキー・資格情報の保管は、ここで
-        /// 何を返しても外す。
+        /// 何を返しても外す。宛先ごとの接続の数（`httpMaximumConnectionsPerHost`）も、何を返しても
+        /// `maxConcurrentRequests` に合わせる。
         ///
         /// Makes the `URLSessionConfiguration` (tests inject stubs here). Caches, cookies and credential
-        /// storage are always removed from whatever it returns.
+        /// storage are always removed from whatever it returns, and `httpMaximumConnectionsPerHost` is always set
+        /// to `maxConcurrentRequests`.
         public var makeURLSessionConfiguration: @Sendable () -> URLSessionConfiguration = { .ephemeral }
         /// 期限の確認に使う時計。 / The clock used for expiry checks.
         public var now: @Sendable () -> Date = { Date() }
