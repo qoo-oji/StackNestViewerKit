@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 追加 / Added
+
+- `StackNestBookSession.cachedPageBytes`（キャッシュに持っているページのバイト数）と `bufferedResponseBytes`（受け取り中の本文のバイト数）。ホストのリソースの監視が、セッションのメモリを数えられる。
+  `StackNestBookSession.cachedPageBytes` (bytes of pages kept in the cache) and `bufferedResponseBytes` (body bytes of responses still arriving), so host resource monitors can account for a session's memory.
+
 ### 変更 / Changed
 
 - 恒久的な失敗（認証の失敗・ライブラリのロック・本が無いなど）を受けた後のセッションは、ページ・manifest・表紙を要求を出さずに同じ失敗で返す（これまでは先読みだけを止め、ほかは毎回要求を出して同じ失敗を受けていた）。書き戻しはこれまでどおり要求を出す。
