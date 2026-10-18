@@ -264,14 +264,28 @@ extension StackNestBookSession {
                 if let failure = error as? StackNestViewerError, failure.isPermanent {
                     state.permanentFailure = failure
                     state.prefetchQueue.removeAll()
-                    // まだ出していない先読みだけの件も出さない（列から外れる）。
-                    for queued in state.queuedFlights where queued.countsAsPrefetch {
-                        if let ticket = state.prefetchTickets[queued.key] { _ = removeWaiterLocked(ticket, effects: &effects) }
-                    }
+                    failQueuedFlightsLocked(with: failure, effects: &effects)
                 }
             }
         }
         apply(effects)
+    }
+
+    /// 恒久的な失敗を受けたとき: 列で待っている件は、書き戻しのほかは要求を出さずにその失敗で戻して列から外す。
+    /// 入口（`preflightFailureLocked`）は失敗の後に来た件しか止めないので、失敗より前に並んだ件もここで止める
+    /// （「恒久的な失敗の後は要求を出さない」の約束）。先読みの指示は結果を受け取らないので、外すだけになる。
+    func failQueuedFlightsLocked(with failure: any Error, effects: inout Effects) {
+        for queued in state.queuedFlights where !queued.key.isProgress {
+            queued.isAbandoned = true
+            if state.flights[queued.key] === queued { state.flights[queued.key] = nil }
+            for (ticket, entry) in queued.waiters {
+                state.tickets[ticket] = nil
+                if state.prefetchTickets[queued.key] == ticket { state.prefetchTickets[queued.key] = nil }
+                effects.resumes.append((entry.waiter, .failure(failure)))
+            }
+            queued.waiters.removeAll()
+        }
+        state.queuedFlights.removeAll { !$0.key.isProgress }
     }
 
     /// ロックの外で行う: 取り消し → 再開 → 新しい件の開始。

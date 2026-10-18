@@ -227,6 +227,33 @@ struct StackNestConcurrencyTests {
         #expect(!record.states.contains(.suspended), "取り消しうるタスクは、すべて始めた後")
         #expect(session.runningCountForTesting == 0)
     }
+
+    @Test("恒久的な失敗の後は、列で待つ表示・manifest の件も出さずに同じ失敗で戻す（書き戻しは出す）",
+          .timeLimit(.minutes(1)))
+    func permanentFailureFailsQueuedDisplayAndManifest() async throws {
+        let stub = StackNestStubServer(pageCount: 8)
+        stub.respond(.page(0), with: .status(401))
+        let gate = stub.gate(.page(0))
+        defer { gate.open() }
+        let session = try makeSession(stub) { $0.maxConcurrentRequests = 1 }
+        let holder = Task { try await session.page(0) }
+        #expect(await gate.arrival())
+        let shown = Task { try await session.page(3) }
+        let manifest = Task { try await session.manifest(refresh: true) }
+        let progress = Task { try await session.postProgress(page: 2) }
+        session.prefetch([1])
+        #expect(await waitUntil { session.queuedKeysForTesting.count == 4 })
+        gate.open()
+        await #expect(throws: StackNestViewerError(.unauthorized)) { try await holder.value }
+        await #expect(throws: StackNestViewerError(.unauthorized)) { try await shown.value }
+        await #expect(throws: StackNestViewerError(.unauthorized)) { try await manifest.value }
+        try await progress.value
+        #expect(await waitUntil { session.queuedKeysForTesting.isEmpty && session.runningCountForTesting == 0 })
+        #expect(session.inFlightKeysForTesting.isEmpty)
+        #expect(session.ticketCountForTesting == 0)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stub.requests.map(\.route) == [.page(0), .progress], "失敗の後に出たのは書き戻しだけ")
+    }
 }
 
 /// 出した要求のタスクの状態の記録（差し込み口から別のスレッドで書く）。
