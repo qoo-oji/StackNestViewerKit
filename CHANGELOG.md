@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 修正 / Fixed
+
+- 2xx でない応答を、本文の大きさより先に状態コードで振り分けるようにした。大きな本文を申告した（または送ってきた）401・403・404 などが、一時的な `responseTooLarge` になっていた（認証の失敗や本が無いことが伝わらず、先読みも止まらなかった）。2xx でない応答の本文は受け取らない。
+  Non-2xx responses are now classified by their status code before the body size limit applies. A 401, 403, 404 and so on that announced (or sent) a large body used to become the transient `responseTooLarge`, hiding the real failure and leaving prefetching running. The bodies of non-2xx responses are no longer read.
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

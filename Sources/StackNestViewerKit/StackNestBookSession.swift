@@ -24,7 +24,10 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// this time of being issued (with `.cannotConnect`), counting slow trickling responses and any queueing.
         /// It bounds each request, not the whole call (a page read can make up to three requests).
         public var waitLimit: Duration = .seconds(25)
-        /// 1 応答の本文の上限。 / The body size limit of one response.
+        /// 1 応答の本文の上限（超えたら `.responseTooLarge`）。2xx でない応答は状態コードで振り分け、本文は受け取らない。
+        ///
+        /// The body size limit of one response (`.responseTooLarge` beyond it). Non-2xx responses are classified by
+        /// their status code and their bodies are never read.
         public var maxResponseBytes = 64 << 20
         /// 持っておくページの枚数。 / How many pages to keep in memory.
         public var pageCacheCount = 8

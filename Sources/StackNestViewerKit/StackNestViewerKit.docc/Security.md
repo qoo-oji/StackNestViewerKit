@@ -35,14 +35,17 @@ func lanConfiguration() -> StackNestBookSession.Configuration {
 ## 要求 / Requests
 
 - リダイレクトには付いて行かない（3xx は `httpStatus`）。鍵は `book` の宛先にだけ送る。
-- 本文は既定で 64 MiB まで（`responseTooLarge`）。期限は要求のたびに確かめる（`expired`）。
+- 本文は既定で 64 MiB まで（`responseTooLarge`）。2xx でない応答は状態コードで振り分け、本文は受け取らない（大きな本文を
+  付けた 401 でも `unauthorized`）。期限は要求のたびに確かめる（`expired`）。
 - `waitLimit`（既定 25 秒）は要求ごとに数え、少しずつ流れ続ける応答でも超えれば `cannotConnect` で戻る。1 回の呼び出し
   （async も同期も）は要求を最大 3 件（範囲の確かめ・ページ・404 の後の読み直し）出しうるので、最悪で `waitLimit` の
   3 倍まで待ってから戻る。
 - `URLSession` はキャッシュ・クッキー・資格情報の保管を持たない。プロキシは使わない（システムや PAC のプロキシは無効にする）ので、鍵がプロキシへ渡ることはない。
 
 - Redirects are refused (3xx fails with `httpStatus`); the token goes only to the `book` origin. The kit never uses a proxy (system and PAC proxies are disabled), so the token can't reach one.
-- Bodies are capped at 64 MiB by default (`responseTooLarge`); expiry is checked before every request (`expired`).
+- Bodies are capped at 64 MiB by default (`responseTooLarge`). Non-2xx responses are classified by their status
+  code and their bodies are never read (a 401 with a large body is still `unauthorized`). Expiry is checked before
+  every request (`expired`).
 - `waitLimit` (25 seconds by default) is counted per request, and a request that exceeds it fails with
   `cannotConnect`, even if the response is trickling in. A single call (async or blocking) can make up to three
   requests (range check, the page, a manifest re-read after a 404), so in the worst case it waits up to three times

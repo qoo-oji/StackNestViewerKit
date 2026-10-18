@@ -9,6 +9,8 @@ final class ResponseSink: @unchecked Sendable {
         var data = Data()
         var error: (any Error)?
         var exceededLimit = false
+        /// 2xx でない応答を、見出しだけで打ち切った（本文は受け取らない。打ち切りの失敗は失敗に数えない）。
+        var endedAfterHeaders = false
     }
 
     private let lock = NSLock()
@@ -22,12 +24,18 @@ final class ResponseSink: @unchecked Sendable {
     }
 
     /// 応答の見出しを受ける。申告（`Content-Length`）が上限を超えたら false（1 バイトも受け取らずに断る）。
+    /// 2xx でない応答も false: 振り分けに使うのは状態コードと見出しだけで、本文は使わない。上限より先に状態コードを
+    /// 見る（大きな本文を申告した 401・404 などが、一時的な「応答が大きすぎる」に化けないように）。
     func receive(_ response: URLResponse) -> Bool {
         lock.withLock {
             if let http = response as? HTTPURLResponse {
                 outcome.statusCode = http.statusCode
                 outcome.contentType = http.value(forHTTPHeaderField: "Content-Type")
                 outcome.libraryLocked = http.value(forHTTPHeaderField: "X-Library-Locked") == "1"
+                guard (200..<300).contains(http.statusCode) else {
+                    outcome.endedAfterHeaders = true
+                    return false
+                }
             }
             guard response.expectedContentLength <= Int64(limit) else {
                 outcome.exceededLimit = true
@@ -53,7 +61,8 @@ final class ResponseSink: @unchecked Sendable {
 
     func complete(error: (any Error)?) {
         let finished = lock.withLock { () -> Outcome in
-            outcome.error = error
+            // 見出しで打ち切った応答の失敗は、こちらが打ち切った取り消し（振り分けは状態コードで済んでいる）。
+            outcome.error = outcome.endedAfterHeaders ? nil : error
             return outcome
         }
         onComplete(finished)
@@ -64,7 +73,7 @@ final class ResponseSink: @unchecked Sendable {
 /// （`URLSession` は無効化するまで delegate を強く持つので、セッションを持たせると 1 冊ごとに漏れる）。
 ///
 /// 役目は 2 つ: ①リダイレクトに付いて行かない（鍵を別の宛先へ渡さない。3xx はそのまま応答になり、`.httpStatus`
-/// で失敗する） ②本文を上限を見ながら受け取る。メソッドは完了ハンドラの形で書く。形が SDK の宣言と食い違うと、
+/// で失敗する） ②2xx の本文を上限を見ながら受け取る（2xx でない応答は見出しで打ち切る）。メソッドは完了ハンドラの形で書く。形が SDK の宣言と食い違うと、
 /// 任意の要求なので黙って呼ばれなくなる（リダイレクトに付いて行く）。試験 `redirectIsRefused` が見張る。
 final class SessionDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
