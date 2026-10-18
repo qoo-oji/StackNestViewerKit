@@ -9,6 +9,8 @@ Release notes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-18
+
 ### 追加 / Added
 
 - 参照ファイル（`.stacknestbook`・版 1）の型 `StackNestBookReference` と検査・作る側の `encodedJSON()`・manifest の型。
