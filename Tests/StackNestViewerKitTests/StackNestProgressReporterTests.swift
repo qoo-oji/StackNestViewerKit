@@ -444,6 +444,8 @@ struct StackNestProgressRegistryTests {
 
 /// 終了時の送り切りのうち、メインスレッドを使わずに待つ形（`flushAllBlocking`）。呼んだスレッド（ここではメイン
 /// スレッド）を止めるので、ほかの試験の時間の前提を崩さないよう、1 つずつ・短い時間で走らせる。
+/// メインスレッドを止めている間は、ほかの suite の @MainActor の試験（まとめ待ちの時間を測るものなど）も待たされる。
+/// ここへ試験を足すときも、止める時間は上限まで待つ試験を除いて短く（数百 ms まで）保つ。
 @MainActor
 @Suite("書き戻しの登録簿: メインスレッドで待つ送り切り", .serialized)
 struct StackNestBlockingFlushTests {
@@ -502,12 +504,16 @@ struct StackNestBlockingFlushTests {
         progress.note(page: 2)
         // メインスレッドが待っている間に、飛んでいる送信（1）の応答を流す。その送信の続き（メインアクター）は
         // 待ちの間は走れないので、2 を送れるのは送り切りがメインスレッドの外で 1 の終わりを知ったときだけ。
+        // 門を開けるのは、仕事が flushAllBlocking を呼ぶ直前の合図の後（固定の待ちだと、仕事が遅れたときに 1 の続きが
+        // 先に 2 を送ってしまい、この道を通らない）。
+        let entering = DispatchSemaphore(value: 0)
         Thread {
-            Thread.sleep(forTimeInterval: 0.05)
+            _ = entering.wait(timeout: .now() + 10) // 合図が来なくても門は開けて、試験を止めない
             gate.open()
         }.start()
         let (count, elapsed) = await inMainQueueJob { () -> (Int, Duration) in
             let start = ContinuousClock.now
+            entering.signal()
             let count = registry.flushAllBlocking(timeout: .seconds(10))
             return (count, ContinuousClock.now - start)
         }
@@ -530,20 +536,32 @@ struct StackNestBlockingFlushTests {
         let progress = reporter(sent, registry)
         progress.note(page: 4)
         let done = Completions()
-        let stalled = await inMainQueueJob { () -> Bool in
+        let spin = Duration.milliseconds(200)
+        let (completedDuringSpin, spun) = await inMainQueueJob { () -> (Int, Duration) in
             registry.flushAll(timeout: .milliseconds(30)) { done.count += 1 }
             // AppKit が終了の応答を待つのと同じく、この仕事の中で run loop を回す（上限の 30 ms を十分に超えて）。
-            // メインキューは入れ子では回らない。
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
-            return done.count == 0
+            // 入力源もタイマーも無い run loop は `run(until:)` がすぐ戻り、回ったことにならないので、何もしない
+            // タイマーを付けて期限まで回し続ける。メインキューは入れ子では回らない。
+            // メインスレッドを止めている間はほかの suite の @MainActor の試験も待たされるので、回す時間は短く保つ。
+            let keepAlive = Timer(timeInterval: 0.01, repeats: true) { _ in }
+            RunLoop.current.add(keepAlive, forMode: .default)
+            defer { keepAlive.invalidate() }
+            let start = ContinuousClock.now
+            while ContinuousClock.now - start < spin {
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+            }
+            return (done.count, ContinuousClock.now - start)
         }
-        // 確かめるのは「completion も上限も来ない」ことだけ。送信そのものはメインの外で始まるが、この 0.2 秒の間に
-        // 終わるかは機械の速さしだい(遅い CI の機械では終わらなかった)なので、ここでは見ない。
-        #expect(stalled)
-        // 仕事を抜ければ進む。
-        while done.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        // 実際に上限を超えて回った上で、completion も上限も来なかったこと。
+        #expect(spun >= spin, "run loop が期限まで回っていない")
+        #expect(completedDuringSpin == 0, "メインキューの仕事の中で completion が呼ばれた")
+        // 仕事を抜ければ進む（送信の終わりは waitUntilIdle で待ってから確かめる）。
+        let deadline = ContinuousClock.now + .seconds(10)
+        while done.count == 0, ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(done.count == 1, "仕事を抜けても completion が来ない")
         await progress.waitUntilIdle()
         #expect(sent.pages == [4])
+        #expect(done.count == 1)
     }
 
     @Test("flushAllBlocking: StackNest が答えなくても timeout で戻り、以後その役は送らない")
