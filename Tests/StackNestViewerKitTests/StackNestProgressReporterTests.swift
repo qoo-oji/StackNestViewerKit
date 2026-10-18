@@ -496,8 +496,9 @@ struct StackNestBlockingFlushTests {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             return done.count == 0
         }
+        // 確かめるのは「completion も上限も来ない」ことだけ。送信そのものはメインの外で始まるが、この 0.2 秒の間に
+        // 終わるかは機械の速さしだい(遅い CI の機械では終わらなかった)なので、ここでは見ない。
         #expect(stalled)
-        #expect(sent.pages == [4], "送信そのものはメインスレッドの外で済んでいる")
         // 仕事を抜ければ進む。
         while done.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
         await progress.waitUntilIdle()
