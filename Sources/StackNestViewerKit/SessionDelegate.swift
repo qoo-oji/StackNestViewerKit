@@ -51,6 +51,9 @@ final class ResponseSink: @unchecked Sendable {
         }
     }
 
+    /// これまでに受け取った本文のバイト数（完了の前まで）。
+    var bufferedBytes: Int { lock.withLock { outcome.data.count } }
+
     func complete(error: (any Error)?) {
         let finished = lock.withLock { () -> Outcome in
             outcome.error = error
@@ -80,6 +83,12 @@ final class SessionDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendab
 
     private func sink(for task: URLSessionTask) -> ResponseSink? {
         lock.withLock { sinks[task.taskIdentifier] }
+    }
+
+    /// 受け取り中の本文のバイト数の合計。受け皿の表を写してから、表のロックを外して数える（2 つのロックを重ねない）。
+    var bufferedBytes: Int {
+        let current = lock.withLock { Array(sinks.values) }
+        return current.reduce(0) { $0 + $1.bufferedBytes }
     }
 
     func urlSession(

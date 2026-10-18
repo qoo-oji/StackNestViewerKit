@@ -6,7 +6,8 @@ struct PageCache {
     private let capacity: Int
     private let byteBudget: Int
     private var entries: [(key: RequestKey, response: FetchedResponse)] = []
-    private var totalBytes = 0
+    /// 持っているページのバイト数の合計。
+    private(set) var totalBytes = 0
 
     init(capacity: Int, byteBudget: Int) {
         self.capacity = max(capacity, 0)

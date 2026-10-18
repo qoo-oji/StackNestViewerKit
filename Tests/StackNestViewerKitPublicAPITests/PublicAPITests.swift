@@ -96,6 +96,17 @@ struct PublicAPITests {
         #expect(stub.requests.contains { $0.progressPage == 2 })
     }
 
+    @Test("セッションのメモリの量を公開の面だけで読める")
+    func memoryUseIsReadable() async throws {
+        let stub = StackNestStubServer(pageCount: 2)
+        let session = StackNestBookSession(reference: try stub.reference(), configuration: stub.configuration())
+        let page = try await session.page(1)
+        #expect(session.cachedPageBytes == page.data.count)
+        #expect(session.bufferedResponseBytes == 0)
+        session.close()
+        #expect(session.cachedPageBytes == 0)
+    }
+
     @Test("画素データが 65,535 バイトを超える PNG も画像として読め、目印が読み戻せる")
     func largePngPageDecodes() throws {
         // stored ブロックは 1 つ 65,535 バイトまでなので、それを超える大きさでブロックの分割が正しいかを見る。

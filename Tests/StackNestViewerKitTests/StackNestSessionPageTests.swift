@@ -143,6 +143,33 @@ struct StackNestSessionPageTests {
         #expect(stub.requests.map(\.route) == [.page(0), .page(0), .page(1)])
     }
 
+    @Test("cachedPageBytes はキャッシュに持っているページのバイト数（捨てたら減り、持たないページは数えず、閉じたら 0）")
+    func cachedPageBytesFollowsTheCache() async throws {
+        let stub = StackNestStubServer(pageCount: 4)
+        stub.respond(.page(0), with: .status(200, body: Data(count: 300)))
+        stub.respond(.page(1), with: .status(200, body: Data(count: 200)))
+        stub.respond(.page(2), with: .status(200, body: Data(count: 100)))
+        stub.respond(.page(3), with: .status(200, body: Data(count: 600)))
+        let session = try makeSession(stub) {
+            $0.pageCacheCount = 2
+            $0.pageCacheBytes = 1000
+        }
+        #expect(session.cachedPageBytes == 0)
+        _ = try await session.page(0)
+        _ = try await session.page(1)
+        #expect(session.cachedPageBytes == 500)
+        _ = try await session.page(2)
+        #expect(session.cachedPageBytes == 300, "枚数で 0 番を捨てた")
+        _ = try await session.page(3)
+        #expect(session.cachedPageBytes == 300, "予算の半分を超えるページは持たない")
+        stub.setPageCount(2)
+        _ = try await session.manifest(refresh: true)
+        #expect(session.cachedPageBytes == 200, "範囲の外になった 2 番を捨てた")
+        #expect(session.bufferedResponseBytes == 0, "受け取り中の応答は無い")
+        session.close()
+        #expect(session.cachedPageBytes == 0)
+    }
+
     @Test("負の番号は要求なしで .pageOutOfRange（既知のページ数が入る）")
     func outOfRangeMakesNoRequest() async throws {
         let stub = StackNestStubServer(pageCount: 3)
@@ -309,5 +336,40 @@ struct PageCacheTests {
         #expect(cache.keys == [key(0), key(1)])
         cache.store(response(51), for: key(0))
         #expect(cache.keys == [key(1)])
+    }
+}
+
+@Suite("受け取り中の量")
+struct BufferedResponseBytesTests {
+    @Test("delegate は受け取り中の本文の合計を数え、完了・登録の取り消しで外す")
+    func delegateCountsBodiesStillArriving() throws {
+        let delegate = SessionDelegate()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let url = try #require(URL(string: "http://127.0.0.1:9/"))
+        let first = session.dataTask(with: url)
+        let second = session.dataTask(with: url)
+        let firstSink = ResponseSink(limit: 1000) { _ in }
+        let secondSink = ResponseSink(limit: 1000) { _ in }
+        delegate.register(firstSink, for: first)
+        delegate.register(secondSink, for: second)
+        #expect(delegate.bufferedBytes == 0)
+        #expect(firstSink.append(Data(count: 120)))
+        #expect(secondSink.append(Data(count: 30)))
+        #expect(secondSink.append(Data(count: 30)))
+        #expect(delegate.bufferedBytes == 180)
+        delegate.urlSession(session, task: first, didCompleteWithError: nil)
+        #expect(delegate.bufferedBytes == 60, "完了した応答は数えない")
+        delegate.unregister(second)
+        #expect(delegate.bufferedBytes == 0)
+    }
+
+    @Test("上限を超えて捨てた本文は数えない")
+    func discardedBodyIsNotCounted() {
+        let sink = ResponseSink(limit: 100) { _ in }
+        #expect(sink.append(Data(count: 80)))
+        #expect(sink.bufferedBytes == 80)
+        #expect(!sink.append(Data(count: 30)))
+        #expect(sink.bufferedBytes == 0)
     }
 }

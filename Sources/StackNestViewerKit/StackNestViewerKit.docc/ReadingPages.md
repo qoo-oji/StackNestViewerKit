@@ -25,6 +25,26 @@ func thumbnail(_ session: StackNestBookSession, page: Int) async throws -> Stack
 }
 ```
 
+## メモリの量 / Memory Use
+
+リソースの監視を持つホストは、``StackNestBookSession/cachedPageBytes``（キャッシュに持っているページ）と
+``StackNestBookSession/bufferedResponseBytes``（受け取り中の本文）で、セッションのメモリを数えられる。どちらも
+ロックの中で数を読むだけで、呼ぶ側を待たせない。返したページはキャッシュと同じバッファを指していることがあるので、
+ホストが自分で持つページの大きさと足すと二重に数えることがある。
+
+Hosts with a resource monitor can account for a session's memory with ``StackNestBookSession/cachedPageBytes``
+(pages kept in the cache) and ``StackNestBookSession/bufferedResponseBytes`` (bodies still arriving). Both only read
+a count under a lock and never make the caller wait. A returned page may share its buffer with the cache, so adding
+the size of pages the host keeps itself can count the same bytes twice.
+
+```swift
+import StackNestViewerKit
+
+func memoryInUse(by session: StackNestBookSession) -> Int {
+    session.cachedPageBytes + session.bufferedResponseBytes
+}
+```
+
 ## 先読み / Prefetching
 
 ``StackNestBookSession/prefetch(_:maxWidth:)`` は指示を置き換える。外れた取得中の先読みは（表示の要求が乗って

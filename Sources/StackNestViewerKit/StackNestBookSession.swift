@@ -223,6 +223,22 @@ public final class StackNestBookSession: @unchecked Sendable {
         apply(effects)
     }
 
+    /// いまページのキャッシュに持っているバイト数の合計（`pageCacheBytes` を超えない。閉じた後は 0）。ホストの
+    /// リソースの監視が、このセッションのメモリを数えるためのもの。返したページ（`StackNestPage.data`）は
+    /// キャッシュと同じバッファを指していることがあるので、ホストが自分で持つページと足すと二重に数えることがある。
+    ///
+    /// The bytes currently held in the page cache (never more than `pageCacheBytes`; 0 after `close()`), for host
+    /// resource monitors that account for this session's memory. A returned page (`StackNestPage.data`) may share
+    /// its buffer with the cache, so adding it to pages the host keeps itself can count the same bytes twice.
+    public var cachedPageBytes: Int { lock.withLock { state.cache.totalBytes } }
+
+    /// いま受け取っている途中の応答の本文のバイト数の合計（届き終わった応答は含まない。ページはその後キャッシュと
+    /// `cachedPageBytes` に移る）。
+    ///
+    /// The body bytes received so far by responses still arriving (finished responses aren't included; pages then
+    /// move to the cache and `cachedPageBytes`).
+    public var bufferedResponseBytes: Int { delegate.bufferedBytes }
+
     // MARK: - async の顔
 
     /// async の待つ人として加わる。取り消されたら待つ人から抜け、待つ人が誰もいなくなったときだけ要求を取り消す。
