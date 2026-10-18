@@ -244,7 +244,7 @@ struct StackNestSessionRequestTests {
         let session = StackNestBookSession(reference: reference)
         #expect(session.makeRequest(for: .page(index: 3, maxWidth: 200))?.url?.absoluteString
                 == "http://[fe80::1%25en0]:51234/api/v1/libraries/L/books/7/pages/3?maxw=200")
-        #expect(session.makeRequest(for: .manifest)?.url?.absoluteString
+        #expect(session.makeRequest(for: .manifest(generation: 0))?.url?.absoluteString
                 == "http://[fe80::1%25en0]:51234/api/v1/libraries/L/books/7/manifest")
         let post = session.makeRequest(for: .progress(serial: 1, page: 5))
         #expect(post?.httpMethod == "POST")
@@ -360,7 +360,7 @@ struct StackNestSessionRequestTests {
     func olderManifestResponseDoesNotOverwriteNewer() async throws {
         let stub = StackNestStubServer(pageCount: 10)
         let session = try makeSession(stub)
-        let older = try await session.fetch(.manifest, priority: .display)
+        let older = try await session.fetchManifest(fresh: false)
         stub.setPageCount(4)
         #expect(try await session.manifest(refresh: true).pageCount == 4)
         // 先に取った（件の古い）応答が最後に記録される。呼んだ人には読んだ値が返るが、状態は戻らない。
@@ -391,20 +391,59 @@ struct StackNestSessionRequestTests {
         #expect(try StackNestStubServer(direction: "vertical").reference().direction == .unknown("vertical"))
     }
 
-    @Test("同じ manifest を同時に読んでも、要求は 1 件")
+    @Test("同じ manifest を同時に読んでも（読み直しでなければ）、要求は 1 件")
     func concurrentManifestReadsShareOneRequest() async throws {
         let stub = StackNestStubServer()
         let gate = stub.gate(.manifest)
         defer { gate.open() }
         let session = try makeSession(stub)
-        async let first = session.manifest(refresh: true)
+        async let first = session.manifest()
         #expect(await gate.arrival())
-        async let second = session.manifest(refresh: true)
-        #expect(await waitUntil { session.waiterCountForTesting(.manifest) == 2 })
+        async let second = session.manifest()
+        #expect(await waitUntil { session.waiterCountForTesting(.manifest(generation: 0)) == 2 })
         gate.open()
         let (a, b) = try await (first, second)
         #expect(a == b)
         #expect(stub.requestCount(.manifest) == 1)
+    }
+
+    @Test("読み直し（refresh: true）は、前から飛んでいる manifest の要求に乗らず、自分の要求の答えを返す")
+    func refreshDoesNotJoinAnOlderFlight() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let gate = stub.gate(.manifest)
+        defer { gate.open() }
+        let session = try makeSession(stub)
+        let older = Task { try await session.manifest() }
+        #expect(await gate.arrival(), "先の要求は 3 ページの時点で StackNest に届いた")
+        stub.setPageCount(5)
+        let refreshed = Task { try await session.manifest(refresh: true) }
+        #expect(await gate.arrival(), "読み直しは自分の要求を出す")
+        // 読み直しの後の、読み直しでない読み出しは新しい方の件に乗る。
+        let joining = Task { try await session.manifest() }
+        #expect(await waitUntil { session.waiterCountForTesting(.manifest(generation: 1)) == 2 })
+        gate.open()
+        #expect(try await refreshed.value.pageCount == 5)
+        #expect(try await joining.value.pageCount == 5)
+        #expect(try await older.value.pageCount == 3, "先の要求の人には、その答えを返す")
+        #expect(session.knownPageCountForTesting == 5, "古い答えは新しい状態を上書きしない")
+        #expect(stub.requestCount(.manifest) == 2)
+    }
+
+    @Test("404 の後の読み直しも、前から飛んでいる manifest の要求に乗らない（減ったページ数で振り分ける）")
+    func missingPageRecheckDoesNotJoinAnOlderFlight() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let gate = stub.gate(.manifest)
+        defer { gate.open() }
+        let session = try makeSession(stub)
+        let older = Task { try await session.manifest() }
+        #expect(await gate.arrival())
+        stub.setPageCount(2)
+        let page = Task { try await session.page(2) }
+        #expect(await gate.arrival(), "404 の後に自分の読み直しを出す")
+        gate.open()
+        await #expect(throws: StackNestViewerError(.pageOutOfRange, pageCount: 2)) { try await page.value }
+        #expect(try await older.value.pageCount == 3)
+        #expect(stub.requests.map(\.route) == [.manifest, .page(2), .manifest])
     }
 
     @Test("加わる前に取り消された待つ人は、要求を出さずに 1 度だけ取り消しで戻る", .timeLimit(.minutes(1)))

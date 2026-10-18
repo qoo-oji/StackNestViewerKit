@@ -16,6 +16,15 @@ PNG or WebP; check the format by `contentType` or the bytes. For relayed remote 
 scaled so the longer side is at most 1600 pixels, as JPEG. Concurrent requests for the same page share one request,
 and recent pages (8 pages and 64 MiB in total by default; a page larger than half of that isn't kept) stay in memory.
 
+本のページ数は開いた後に変わることがある。``StackNestBookSession/manifest(refresh:)`` に `refresh: true` を渡すと、
+呼んだ後に出した要求の答えを返す（その前から飛んでいる manifest の要求には乗らない）。`pages/{n}` の 404 の後の
+確かめも同じで、減ったページ数で `pageOutOfRange` に振り分ける。`refresh` を付けない読み出しは、飛んでいる要求に乗る。
+
+A book's page count can change after it is opened. With `refresh: true`,
+``StackNestBookSession/manifest(refresh:)`` answers from a request made after the call (it never joins a manifest
+request already in flight). The check after a `pages/{n}` 404 works the same way, so a shrunk book is reported as
+`pageOutOfRange`. Reads without `refresh` join a request in flight.
+
 ```swift
 import StackNestViewerKit
 

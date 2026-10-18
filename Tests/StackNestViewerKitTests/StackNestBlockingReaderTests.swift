@@ -46,6 +46,28 @@ struct StackNestBlockingReaderTests {
         #expect(throws: StackNestViewerError(.pageOutOfRange, pageCount: 2)) { try shrunkResult.get() }
     }
 
+    @Test("同期の顔の読み直しと 404 の後の確かめも、前から飛んでいる manifest の要求に乗らない")
+    func blockingRefreshDoesNotJoinAnOlderFlight() async throws {
+        let stub = StackNestStubServer(pageCount: 3)
+        let gate = stub.gate(.manifest)
+        defer { gate.open() }
+        let session = try makeSession(stub)
+        let blocking = reader(session)
+        let older = Task { try await session.manifest() }
+        #expect(await gate.arrival(), "先の要求は 3 ページの時点で StackNest に届いた")
+        stub.setPageCount(2)
+        async let refreshed = onThread { Result { try blocking.manifest(refresh: true) } }
+        async let missing = onThread { Result { try blocking.page(2) } }
+        #expect(await gate.arrival())
+        #expect(await gate.arrival(), "読み直しと 404 の後の確かめが、それぞれ自分の要求を出す")
+        gate.open()
+        let (refreshResult, missingResult) = await (refreshed, missing)
+        #expect(try refreshResult.get().pageCount == 2)
+        #expect(throws: StackNestViewerError(.pageOutOfRange, pageCount: 2)) { try missingResult.get() }
+        #expect(try await older.value.pageCount == 3)
+        #expect(stub.requestCount(.manifest) == 3)
+    }
+
     @Test("manifest とページを同期で読む（専用のスレッドからなら誤りの知らせは出ない）")
     func readsManifestAndPages() async throws {
         let stub = StackNestStubServer(pageCount: 4)

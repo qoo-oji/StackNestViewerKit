@@ -116,13 +116,16 @@ public final class StackNestBookSession: @unchecked Sendable {
     }
 
     /// manifest。開いたら最初に呼ぶ（StackNest が「読み込まれた」と早く気づける）。`refresh` が false なら、
-    /// 読んだことのある manifest を返す。閉じた後は `CancellationError`。
+    /// 読んだことのある manifest を返す（まだ無ければ、飛んでいる manifest の要求に乗る）。`refresh` が true なら、
+    /// 呼んだ後に出した要求の答えを返す（その前から飛んでいる要求には乗らない）。閉じた後は `CancellationError`。
     ///
     /// The manifest. Call it first after opening, so StackNest notices the open early. Without `refresh`,
-    /// a manifest already read is returned. Throws `CancellationError` after `close()`.
+    /// a manifest already read is returned (or a manifest request already in flight is joined). With `refresh`,
+    /// the answer comes from a request made after the call, never from one already in flight. Throws
+    /// `CancellationError` after `close()`.
     public func manifest(refresh: Bool = false) async throws -> StackNestBookManifest {
         if !refresh, let cached = cachedManifest { return cached }
-        return try recordManifest(try await fetch(.manifest, priority: .display))
+        return try recordManifest(try await fetchManifest(fresh: refresh))
     }
 
     /// ページ（`index` は StackNest のページ番号・0 始まり）。`maxWidth` は `?maxw=`（0 以下は付けない）。
@@ -256,17 +259,24 @@ public final class StackNestBookSession: @unchecked Sendable {
         }
     }
 
-    /// 範囲の確認（async）。
+    /// manifest の要求（async）。`fresh` は呼んだ後に始めた件の答えだけを使う。
+    func fetchManifest(fresh: Bool) async throws -> FetchedResponse {
+        try await fetch(manifestKey(fresh: fresh), priority: .display)
+    }
+
+    /// 範囲の確認（async）。確かめるのは参照ファイルを書いた時点のページ数との差なので、飛んでいる manifest の
+    /// 要求（どれもセッションを作った後に出している）に乗ってよい。
     private func ensureInRange(_ index: Int) async throws {
         let (known, confirmed) = lock.withLock { (state.knownPageCount, state.hasConfirmedPageCount) }
         guard index >= 0 else { throw StackNestViewerError(.pageOutOfRange, pageCount: known) }
         if index < known { return }
-        if !confirmed { _ = try await manifest(refresh: true) }
+        if !confirmed { _ = try recordManifest(try await fetchManifest(fresh: false)) }
         let current = lock.withLock { state.knownPageCount }
         guard index < current else { throw StackNestViewerError(.pageOutOfRange, pageCount: current) }
     }
 
-    /// `pages/{n}` の 404 を、manifest を 1 度読み直して振り分ける（async）。
+    /// `pages/{n}` の 404 を、manifest を 1 度読み直して振り分ける（async）。読み直しは 404 を受けた後に出した要求
+    /// （`refresh: true`）で行う。前から飛んでいる要求の答えは、ページ数が減る前のものでありうる。
     private func classifyMissingPage(_ index: Int) async -> any Error {
         do {
             return Self.missingPageError(index: index, manifest: .success(try await manifest(refresh: true)))

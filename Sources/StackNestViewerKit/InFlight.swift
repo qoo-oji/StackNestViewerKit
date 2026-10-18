@@ -1,8 +1,11 @@
 import Foundation
 
-/// 要求の鍵。同じ鍵の要求は 1 件にまとめる（書き戻しは通し番号で必ず別の件）。
+/// 要求の鍵。同じ鍵の要求は 1 件にまとめる（書き戻しは通し番号で必ず別の件）。manifest は世代を持つ: 読み直し
+/// （`refresh`・404 の後の確かめ）は世代を進めて新しい件を出し、それより前から飛んでいる件には乗らない
+/// （前から飛んでいる件は、読み直しを決めた時点より古い StackNest の状態を答えうる）。読み直しでない読み出しは、
+/// いまの世代の件に乗る。
 enum RequestKey: Hashable, Sendable {
-    case manifest
+    case manifest(generation: UInt64)
     case page(index: Int, maxWidth: Int?)
     case cover(maxWidth: Int?)
     case progress(serial: UInt64, page: Int)
@@ -113,6 +116,8 @@ struct EngineState {
     /// manifest を 1 度でも読んだか（範囲外の確かめ直しはセッションごとに 1 度だけ）。
     var hasConfirmedPageCount = false
     var manifest: StackNestBookManifest?
+    /// manifest の件の世代（読み直しのたびに進む）。
+    var manifestGeneration: UInt64 = 0
     /// 最後に反映した manifest の応答の件の通し番号（古い応答で新しい manifest を上書きしない）。
     var manifestSerial: UInt64 = 0
     var isClosed = false
