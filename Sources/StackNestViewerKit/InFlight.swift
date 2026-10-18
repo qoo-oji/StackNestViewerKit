@@ -139,7 +139,12 @@ struct EngineState {
     /// 枠を使っている件の通し番号。出した要求が終わる（delegate が完了を知らせる）まで枠を返さない
     /// （取り消した要求も、終わるまでは `URLSession` の接続を使っているため）。
     var runningSerials: Set<UInt64> = []
+    /// 試験だけが置く。要求を出した直後に、ロックの外で呼ぶ。
+    var launchHookForTesting: LaunchHook?
 }
+
+/// 試験の差し込み口: 出した件の鍵とタスク。
+typealias LaunchHook = @Sendable (RequestKey, URLSessionTask) -> Void
 
 /// ロックの中で決め、ロックの外で行うこと。
 struct Effects {

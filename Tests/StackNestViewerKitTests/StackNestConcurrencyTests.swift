@@ -197,4 +197,43 @@ struct StackNestConcurrencyTests {
             #expect(StackNestFixtures.marker(of: try await reader.value.get().data) == index)
         }
     }
+
+    @Test("出した直後に取り消しても、始める前のタスクを取り消さず、枠は必ず返る（何度繰り返しても枠が減らない）",
+          .timeLimit(.minutes(1)))
+    func cancelRightAfterLaunchNeverLeaksASlot() async throws {
+        let stub = StackNestStubServer(pageCount: 12)
+        let session = try makeSession(stub) { $0.maxConcurrentRequests = 1 }
+        let record = LaunchRecord()
+        // 出した直後（ロックの外）に、その件の待つ人を抜けさせる（先読みの置き換え・閉じる）。ここで取り消しが
+        // 始める前のタスクに届くと、完了が知らされるかは `URLSession` 任せになり、枠が戻らないことがある。
+        session.setLaunchHookForTesting { key, task in
+            record.append(task.state)
+            guard case .page(let index, _) = key else { return }
+            if index < 10 { session.prefetch([]) } else { session.close() }
+        }
+        // 枠は 1 つだけなので、1 度でも漏れれば以後の要求は出ない。
+        for index in 0..<10 {
+            session.prefetch([index])
+            #expect(await waitUntil { session.runningCountForTesting == 0 && session.inFlightKeysForTesting.isEmpty },
+                    "置き換えで取り消した件の枠が返る（\(index) 回目）")
+        }
+        let reader = Task { try await session.page(10) }
+        await #expect(throws: CancellationError.self) { try await reader.value }
+        #expect(await waitUntil { session.runningCountForTesting == 0 }, "閉じて取り消した件の枠も返る")
+        session.setLaunchHookForTesting(nil)
+        try await session.postProgress(page: 5)
+        #expect(stub.requests.last?.route == .progress, "枠が残っているので、閉じた後の書き戻しが出る")
+        #expect(record.states.count == 11, "先読み 10 件と、閉じたページ 1 件")
+        #expect(!record.states.contains(.suspended), "取り消しうるタスクは、すべて始めた後")
+        #expect(session.runningCountForTesting == 0)
+    }
+}
+
+/// 出した要求のタスクの状態の記録（差し込み口から別のスレッドで書く）。
+private final class LaunchRecord: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [URLSessionTask.State] = []
+
+    func append(_ state: URLSessionTask.State) { lock.withLock { values.append(state) } }
+    var states: [URLSessionTask.State] { lock.withLock { values } }
 }

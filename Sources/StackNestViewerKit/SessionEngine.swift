@@ -1,6 +1,7 @@
 import Foundation
 
-/// セッションのエンジン（1 本の道）。ロックの中では帳簿だけを付け、再開・取り消し・要求の開始はロックの外で行う。
+/// セッションのエンジン（1 本の道）。ロックの中では帳簿だけを付け、待つ人の再開・取り消し・要求の組み立てはロックの外で
+/// 行う（出す要求の `resume()` だけは、表へ載せるのと同じロックの中で行う。`launch` を参照）。
 extension StackNestBookSession {
     // MARK: - 札
 
@@ -202,14 +203,20 @@ extension StackNestBookSession {
             ResponseSink(limit: configuration.maxResponseBytes) { [weak self] outcome in
                 self?.finish(key, serial: serial, with: Self.classify(outcome, for: key))
             }, for: task)
-        let started: Bool = lock.withLock {
-            guard !flight.isAbandoned else { return false }
+        let (started, hook): (Bool, LaunchHook?) = lock.withLock {
+            guard !flight.isAbandoned else { return (false, nil) }
             flight.task = task
             task.priority = flight.desiredPriority
-            return true
+            // 表へ載せたのと同じロックの中で始める。載せた後は `removeWaiterLocked`・`close()` が取り消しうるので、
+            // ロックの外で始めると、始める前の取り消しが割り込める。始める前に取り消した要求の完了を `URLSession` が
+            // 知らせるかは文書に無く、枠は完了でだけ返るので、知らされなければ枠が永久に減る。`resume()` は要求を
+            // `URLSession` 自身の列へ渡すだけで delegate を同期に呼ばない（優先度の書き込みと同じ扱い）ので、
+            // 「ロックを持ったまま呼び戻さない」の約束は保てる。
+            task.resume()
+            return (true, state.launchHookForTesting)
         }
         if started {
-            task.resume()
+            hook?(flight.key, task)
         } else {
             delegate.unregister(task)
             task.cancel()
@@ -349,6 +356,8 @@ extension StackNestBookSession {
     var ticketCountForTesting: Int { lock.withLock { state.tickets.count } }
     var queuedKeysForTesting: [RequestKey] { lock.withLock { state.queuedFlights.map(\.key) } }
     var runningCountForTesting: Int { lock.withLock { state.runningSerials.count } }
+    /// 要求を出した直後（ロックの外）に呼ぶ閉包を置く。出した直後に取り消す試験のため。
+    func setLaunchHookForTesting(_ hook: LaunchHook?) { lock.withLock { state.launchHookForTesting = hook } }
     var urlSessionConfigurationForTesting: URLSessionConfiguration { urlSession.configuration }
     var delegateForTesting: AnyObject { delegate }
 }
