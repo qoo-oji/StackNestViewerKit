@@ -9,6 +9,16 @@ Release notes.
 
 ## [Unreleased]
 
+### 追加 / Added
+
+- `StackNestBookSession.Configuration.maxConcurrentRequests`（既定 6）。セッションが同時に出す要求の上限。
+  `StackNestBookSession.Configuration.maxConcurrentRequests` (6 by default), the most requests a session has in flight at once.
+
+### 変更 / Changed
+
+- セッションは同時に出す要求を `maxConcurrentRequests` までに絞り、残りを自分の列で待たせて、書き戻し → 表示の要求 → 先読みの順に出す（列で待つ先読みに表示の要求が乗れば前へ出る。待つ人がいなくなった件は要求を出さずに外す）。`URLSession` の宛先ごとの接続の数も同じ値にする。これまでは要求をすべてすぐ `URLSession` へ渡していたので、多くのスレッドから一度にページを頼むと、宛先ごとの接続の数（macOS の既定 6）を超えた分が `URLSession` の中で待ち、表示の要求が先読みの後ろで時間切れになったり、遅い中継では StackNest へ届かないまま `cannotConnect` で戻ったりした。
+  A session now keeps at most `maxConcurrentRequests` requests in flight; the rest wait in its own queue and start in this order: progress write-backs, display requests, prefetches (a queued prefetch that a display request joins moves ahead, and a queued fetch whose waiters all leave is dropped without a request). `URLSession`'s per-host connection limit is set to the same value. Previously every request went to `URLSession` at once, so when many threads asked for pages together, those beyond the per-host limit (6 by default on macOS) waited inside `URLSession`, where display requests could time out behind prefetches, or, with a slow relay, fail with `cannotConnect` without ever reaching StackNest.
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

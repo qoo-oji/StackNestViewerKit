@@ -90,6 +90,14 @@ final class Flight {
     }
 
     var desiredPriority: Float { displayWaiterCount > 0 ? URLSessionTask.highPriority : URLSessionTask.lowPriority }
+
+    /// 出す順の組（小さいほど先）: 0 = 書き戻し（小さく、遅れると読書位置が巻き戻って見える）、1 = 表示の要求が
+    /// 乗っている件、2 = 先読みだけの件。同じ組の中は件を作った順（通し番号の順）。表示の要求が乗れば、その場で
+    /// 1 の組へ上がる。
+    var admissionRank: Int {
+        if key.isProgress { return 0 }
+        return displayWaiterCount > 0 ? 1 : 2
+    }
 }
 
 /// 札（待つ人の ID）の状態。再開の権利はロックの中で 1 度だけ決まる。
@@ -121,6 +129,11 @@ struct EngineState {
     var prefetchQueue: [RequestKey] = []
     /// 取得中の件に乗っている先読みの札。
     var prefetchTickets: [RequestKey: UInt64] = [:]
+    /// まだ出していない件（作った順）。同時の数の枠が空くと、`admissionRank` の順に出す。
+    var queuedFlights: [Flight] = []
+    /// 枠を使っている件の通し番号。出した要求が終わる（delegate が完了を知らせる）まで枠を返さない
+    /// （取り消した要求も、終わるまでは `URLSession` の接続を使っているため）。
+    var runningSerials: Set<UInt64> = []
 }
 
 /// ロックの中で決め、ロックの外で行うこと。
