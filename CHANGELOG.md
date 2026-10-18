@@ -9,6 +9,13 @@ Release notes.
 
 ## [Unreleased]
 
+### 変更 / Changed
+
+- `Content-Length` を申告した応答は、その大きさ（`maxResponseBytes` まで）を先に確保してから受け取る。足していくだけのときの、大きなページを受け取る間の確保のし直し（一時に倍近く）と確保の余りが無くなる。
+  Responses that announce `Content-Length` now allocate that size (up to `maxResponseBytes`) before the body arrives, avoiding repeated reallocation (briefly close to twice the size) and leftover capacity while large pages are received.
+- `pageCacheBytes` の半分を超えるページは持たれず、読むたびに取り直されることを説明に書いた（既定では 32 MiB を超え 64 MiB までのページ）。
+  Documented that pages larger than half of `pageCacheBytes` are never kept and are fetched again on every read (with the defaults, pages over 32 MiB and up to 64 MiB).
+
 ## [0.1.0] - 2026-10-18
 
 ### 追加 / Added

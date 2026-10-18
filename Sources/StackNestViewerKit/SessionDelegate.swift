@@ -15,6 +15,8 @@ final class ResponseSink: @unchecked Sendable {
     private let limit: Int
     private let onComplete: @Sendable (Outcome) -> Void
     private var outcome = Outcome()
+    /// 申告に合わせて先に確保した大きさ（試験が見る）。
+    private var reserved = 0
 
     init(limit: Int, onComplete: @escaping @Sendable (Outcome) -> Void) {
         self.limit = limit
@@ -33,9 +35,18 @@ final class ResponseSink: @unchecked Sendable {
                 outcome.exceededLimit = true
                 return false
             }
+            // 申告があれば、その大きさを先に確保する（上限以下なのは上で確かめた）。足していくだけだと、育つたびに
+            // 確保し直して一時は倍近くを持ち、確保の余りも残る（上限の 64 MiB に近い応答で目立つ）。申告より多く
+            // 届いたら（圧縮を解いた本文など）、そこからはふつうに育つ。上限はこれまでどおり受け取った量で見る。
+            if response.expectedContentLength > 0 {
+                reserved = Int(response.expectedContentLength)
+                outcome.data.reserveCapacity(reserved)
+            }
             return true
         }
     }
+
+    var reservedCapacityForTesting: Int { lock.withLock { reserved } }
 
     /// 受け取った分を足す。合計が上限を超えたら false（呼び出し側が取り消す。申告が無い・偽りのとき）。
     func append(_ chunk: Data) -> Bool {
