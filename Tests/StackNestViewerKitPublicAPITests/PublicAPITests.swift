@@ -86,6 +86,18 @@ struct PublicAPITests {
         session.close()
     }
 
+    @Test("もう一度渡す頼みを参照ファイルと同一性から作り、URL を読み戻せる（公開の面だけで）")
+    func reopenRequestThroughThePublicSurface() throws {
+        let stub = StackNestStubServer(pageCount: 1)
+        let identity = "sn1-publicAPIreopen"
+        let request = try #require(StackNestReopenRequest(reference: try stub.reference(), bookIdentity: identity))
+        #expect(request.url.scheme == StackNestReopenRequest.scheme)
+        #expect(StackNestReopenRequest(url: request.url) == request)
+        #expect(request.bookIdentity == identity)
+        let made = try StackNestReopenRequest(libraryUUID: request.libraryUUID, bookID: request.bookID, bookIdentity: identity)
+        #expect(made == request)
+    }
+
     @Test("ビューアの試験に置く自己点検（Info.plist の宣言）")
     func selfCheckOfTheDeclaration() {
         let info: [String: Any] = [StackNestViewerSupport.infoPlistKey: [StackNestViewerSupport.versionsKey: [1]]]

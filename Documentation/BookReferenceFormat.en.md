@@ -146,6 +146,20 @@ Example: `X-StackNest-Viewer: com.example.viewer/1.80; format=1; kit=0.1.0`
 - If it wasn't used yet, StackNest tells the reader that the app hasn't loaded the book and offers a button to open it the usual way (a local book as the file, a remote book in the built-in viewer). The token isn't revoked, so a viewer that starts late still works.
 - When you receive a reference file, fetch `manifest` first, so the open is noticed early.
 
+## Asking StackNest to hand a book over again (`stacknest://viewer/reopen`)
+
+A reference file can't be kept and opened later (its token expires, ports and relay ids change with every hand-off, and StackNest may not be running). To reopen a StackNest book from history or saved data (bookmarks and so on), open the following URL and StackNest hands the book over again.
+
+```
+stacknest://viewer/reopen?library=<library UUID>&book=<book number>&identity=<bookIdentity>
+```
+
+- Take `library` and `book` from the `/api/v1/libraries/<UUID>/books/<number>` of the reference file's `book`, and `identity` from the manifest's `bookIdentity`. Only **books of local libraries for which you received a `bookIdentity`** can be requested (not relayed remote books, nor books from an older StackNest that sends no `bookIdentity`). The URL carries no token.
+- The viewer just opens the URL, with `NSWorkspace.open` for example; macOS launches StackNest if it isn't running. Nothing comes back to the viewer: the result is a normal hand-off (a reference file with a fresh token, opening at StackNest's reading position) or a notice in StackNest.
+- When no app opens the URL (`open` fails), StackNest isn't installed or is an older version without this request (telling the user to update StackNest is fine).
+- StackNest hands the book over only when the library is open in StackNest, or it has handed a book of that library to an external viewer before and remembers where the library is (it opens the library if needed and waits for it to be unlocked); the numbered book still exists and its `bookIdentity` equals `identity` (a reused number never opens another book); and the requesting app is the external viewer the book would be handed to now (the "External Viewer" settings). Requests from other apps are refused.
+- Readers ignore unknown query items (so later versions can add items) and refuse a URL whose `library`, `book` or `identity` is missing, repeated or malformed. In StackNestViewerKit, `StackNestReopenRequest` makes and reads it.
+
 ## What we ask of viewers
 
 - Open at `startPage`. If the viewer keeps its own reading position, prefer the reference file's `startPage`.
@@ -184,3 +198,4 @@ Changes to this document that don't change the format version.
 | 2026-10-10 | Moved to the StackNestViewerKit repository. Added `kit=` to the identification header, relayed pages, the characters of `token`, the accepted forms of `expiresAt` and StackNestViewerKit's loopback default |
 | 2026-10-18 | Added that StackNestViewerKit checks the shape of the `book` path by default (`allowsAnyBookPath`), and the security reason for it |
 | 2026-10-19 | Added `bookIdentity` (the book's identity) to `manifest` |
+| 2026-10-19 | Added the request to hand a book over again (`stacknest://viewer/reopen`) |

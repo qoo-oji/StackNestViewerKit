@@ -146,6 +146,20 @@ X-StackNest-Viewer: <bundle id>/<ビューアの版>; format=<参照ファイル
 - まだ使われていなければ、StackNest は「〈アプリ名〉が本を読み込んでいません」と知らせ、従来の開き方（ローカルの本はファイルのまま、リモートの本は内蔵ビューア）で開くボタンを出します。トークンは取り消さないので、ビューアが遅れて読み始めても動きます。
 - 参照ファイルを受け取ったら、まず `manifest` を取ってください（開いたことが早く伝わります）。
 
+## 本をもう一度渡してもらう（`stacknest://viewer/reopen`）
+
+参照ファイルは、残しておいても後から開き直せません（鍵には期限があり、ポートや中継の id は渡すたびに変わり、StackNest が動いているとも限りません）。履歴や保存データ（ブックマークなど）から StackNest の本を開き直すときは、次の URL を開いて、StackNest にもう一度渡してもらいます。
+
+```
+stacknest://viewer/reopen?library=<ライブラリの UUID>&book=<本の番号>&identity=<bookIdentity>
+```
+
+- `library` と `book` は、参照ファイルの `book` の `/api/v1/libraries/<UUID>/books/<番号>` から取ります。`identity` は `manifest` の `bookIdentity` です。頼めるのは**ローカルのライブラリの本で、`bookIdentity` を受け取った本だけ**です（中継するリモートの本・`bookIdentity` を付けない古い StackNest の本は頼めません）。鍵は含めません。
+- ビューアは URL を `NSWorkspace.open` などで開くだけです。StackNest が動いていなければ macOS が起動します。ビューアへは何も返りません。結果は、ふつうの受け渡し（新しい鍵の参照ファイル。開くページは StackNest の読書位置）か、StackNest の画面の知らせです。
+- この URL を開くアプリが無い（`open` が失敗する）ときは、StackNest が入っていないか、頼みに対応していない古い版です（「StackNest を更新してください」と案内してかまいません）。
+- StackNest は次のときだけ渡します: ライブラリが StackNest で開いている、または外部ビューアへ本を渡したことがあってその場所を覚えている（開いていなければ開き、施錠していれば解錠を待つ）／番号の本が今もあり、その `bookIdentity` が `identity` と同じ（番号が使い回された別の本は開かない）／頼んだアプリが、今その本を渡す外部ビューア（設定の「外部ビューア」）である。ほかのアプリからの頼みは断ります。
+- 読み手は、知らない問い合わせの項目を読み飛ばします（後の版が項目を足せるように）。`library`・`book`・`identity` のどれかが無い・2 回ある・形が外れている URL は断ります。StackNestViewerKit では `StackNestReopenRequest` が作り、読みます。
+
 ## ビューアへのお願い
 
 - `startPage` から開いてください。ビューア自身の読書位置の記録があっても、参照ファイルの `startPage` を優先してください。
@@ -184,3 +198,4 @@ API の詳しい仕様は StackNest のサーバが配る `/openapi.yaml`（`/do
 | 2026-10-10 | StackNestViewerKit のリポジトリへ移した。名乗りの `kit=`・中継のページ・`token` の文字・`expiresAt` の読める形・StackNestViewerKit の既定の宛先（loopback）を書き足した |
 | 2026-10-18 | StackNestViewerKit が既定で `book` のパスの形を確かめること（`allowsAnyBookPath`）と、そのセキュリティ上の理由を書き足した |
 | 2026-10-19 | `manifest` の `bookIdentity`（本の同一性）を書き足した |
+| 2026-10-19 | 本をもう一度渡してもらう頼み（`stacknest://viewer/reopen`）を書き足した |
