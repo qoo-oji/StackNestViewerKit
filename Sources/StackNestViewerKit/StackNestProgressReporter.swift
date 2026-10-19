@@ -109,6 +109,11 @@ public final class StackNestProgressReporter {
         guard !isStopped, !isClosed, page >= 0 else { return }
         if page == lastSentPage, pendingPage == nil { return }
         pendingPage = page
+        scheduleDebounce()
+    }
+
+    /// まとめ待ちを（やり直して）張る。待つ長さは、止まっているページが最初に止まった時刻から数えて `maxWait` を越えない。
+    private func scheduleDebounce() {
         let now = ContinuousClock.now
         let start = firstPendingAt ?? now
         firstPendingAt = start
@@ -206,6 +211,13 @@ public final class StackNestProgressReporter {
             } else if closeDeferred, !retriedAfterClose, let newer = pendingPage, newer != page {
                 retriedAfterClose = true
                 sendPending()
+            } else if !isStopped, !isClosed, debounceTask == nil, let newer = pendingPage, newer != page {
+                // 送信の最中に新しいページが止まり、そのまとめ待ちが送信の終わりより先に発火して空振りしていた
+                // （`sendPending` は飛んでいる送信があると何もしない）。張り直さないと、新しいページは次の合図まで
+                // 送られない（時間切れの失敗はまとめ待ちより長いので、この順がふつう）。最初に止まった時刻から
+                // 数えるので、`maxWait` を過ぎていればすぐ送る。失敗したページそのものしか残っていないときは張らない
+                // （すぐには送り直さない ―― `handle` のコメント）。
+                scheduleDebounce()
             }
         }
     }

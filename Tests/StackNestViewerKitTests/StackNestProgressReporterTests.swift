@@ -14,11 +14,14 @@ final class ScriptedSend: @unchecked Sendable {
     private var inFlight = 0
     private var peak = 0
     private let slowPage: Int?
+    private let slowDelay: Duration
     private let hangs: Bool
 
-    init(_ outcomes: [StackNestViewerError?] = [], slowPage: Int? = nil, hangs: Bool = false) {
+    init(_ outcomes: [StackNestViewerError?] = [], slowPage: Int? = nil, slowDelay: Duration = .milliseconds(50),
+         hangs: Bool = false) {
         self.outcomes = outcomes
         self.slowPage = slowPage
+        self.slowDelay = slowDelay
         self.hangs = hangs
     }
 
@@ -31,7 +34,7 @@ final class ScriptedSend: @unchecked Sendable {
         }
         defer { lock.withLock { inFlight -= 1 } }
         if hangs { try? await Task.sleep(for: .seconds(5)) }
-        if page == slowPage { try? await Task.sleep(for: .milliseconds(50)) }
+        if page == slowPage { try? await Task.sleep(for: slowDelay) }
         if let outcome { throw outcome }
         lock.withLock { delivered.append(page) }
     }
@@ -169,6 +172,32 @@ struct StackNestProgressReporterTests {
         await progress.waitUntilIdle()
         #expect(sent.pages == [2])
         #expect(sent.attemptCount == 2)
+    }
+
+    @Test("送信の最中に止まった新しいページは、まとめ待ちが送信より先に発火しても、送信が失敗した後に送る")
+    func newerPageGoesOutWhenTheFailedSendOutlastsTheDebounce() async {
+        // 送信（400 ms）がまとめ待ち（50 ms）より長く、失敗する。まとめ待ちは送信の最中に空振りする。
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1, slowDelay: .milliseconds(400))
+        let progress = reporter(sent, debounce: .milliseconds(50), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        progress.note(page: 2)
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [2])
+        #expect(sent.attemptCount == 2)
+        #expect(!progress.hasUnsentWork)
+    }
+
+    @Test("失敗したページしか残っていなければ、送信がまとめ待ちより長くても張り直さない（すぐには送り直さない）")
+    func failedPageAloneIsNotRetriedRightAway() async {
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1, slowDelay: .milliseconds(200))
+        let progress = reporter(sent, debounce: .milliseconds(50), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        await progress.waitUntilIdle()
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(sent.attemptCount == 1)
+        #expect(progress.hasUnsentWork, "失敗したページは次の合図・flush・close で送る")
     }
 
     /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔（最後の合図から
