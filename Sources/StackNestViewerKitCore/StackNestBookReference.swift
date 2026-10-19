@@ -41,8 +41,20 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
     ///
     /// For the producer. Throws for values a reader would refuse, so every file it writes can be read back.
     public init(version: Int, title: String, bookURL: URL, token: String, expiresAt: Date,
+                pageCount: Int, direction: StackNestReadingDirection, startPage: Int) throws
+    {
+        try self.init(version: version, title: title, bookURL: bookURL, token: token, expiresAt: expiresAt,
+                      pageCount: pageCount, direction: direction, startPage: startPage, handoff: nil)
+    }
+
+    /// 作る側（組つき）。前の版の `init(version:title:bookURL:token:expiresAt:pageCount:direction:startPage:)` を残すため、
+    /// 既定値ではなく別の init にする（既定値の引数を足すと、前の版の init が公開の面から消える）。
+    ///
+    /// For the producer, with a group. A separate initializer rather than a defaulted argument keeps the previous
+    /// initializer in the public interface.
+    public init(version: Int, title: String, bookURL: URL, token: String, expiresAt: Date,
                 pageCount: Int, direction: StackNestReadingDirection, startPage: Int,
-                handoff: StackNestHandoffGroup? = nil) throws
+                handoff: StackNestHandoffGroup?) throws
     {
         guard version >= 1 else { throw StackNestViewerError(.invalidReference) }
         guard StackNestFormat.supportedVersions.contains(version) else {
