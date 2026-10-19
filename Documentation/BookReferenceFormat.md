@@ -158,7 +158,10 @@ stacknest://viewer/reopen?library=<ライブラリの UUID>&book=<本の番号>&
 - ビューアは URL を `NSWorkspace.open` などで開くだけです。StackNest が動いていなければ macOS が起動します。ビューアへは何も返りません。結果は、ふつうの受け渡し（新しい鍵の参照ファイル。開くページは StackNest の読書位置）か、StackNest の画面の知らせです。
 - この URL を開くアプリが無い（`open` が失敗する）ときは、StackNest が入っていないか、頼みに対応していない古い版です（「StackNest を更新してください」と案内してかまいません）。
 - StackNest は次のときだけ渡します: ライブラリが StackNest で開いている、または外部ビューアへ本を渡したことがあってその場所を覚えている（開いていなければ開き、施錠していれば解錠を待つ）／番号の本が今もあり、その `bookIdentity` が `identity` と同じ（番号が使い回された別の本は開かない）／頼んだアプリが、今その本を渡す外部ビューア（設定の「外部ビューア」）である。ほかのアプリからの頼みは断ります。
-- 読み手は、知らない問い合わせの項目を読み飛ばします（後の版が項目を足せるように）。`library`・`book`・`identity` のどれかが無い・2 回ある・形が外れている URL は断ります。StackNestViewerKit では `StackNestReopenRequest` が作り、読みます。
+- 値の形: `library` は 8-4-4-4-12 の UUID（大文字小文字を問わない。StackNestViewerKit は小文字で書き、StackNest は小文字にそろえて比べる）、`book` は先頭に 0 の無い 10 進の 1〜2^53−1、`identity` は `bookIdentity` と同じ規則です。値は URL のふつうの問い合わせとして読みます（パーセントエンコードを解いてから確かめる）。
+- 読み手は、知らない問い合わせの項目を読み飛ばします（後の版が項目を足せるように）。`library`・`book`・`identity` のどれかが無い・2 回ある・形が外れている URL、ホストやパスをパーセントエンコードした URL、ポート（空のものも）・資格情報・フラグメントの付いた URL は断ります。StackNestViewerKit では `StackNestReopenRequest` が作り、読みます。
+- 頼めるのは手元の StackNest の本です（`book` のホストが `127.0.0.1`・`::1`・`localhost`）。ほかの Mac の StackNest へ直接つないだ本は頼めません。
+- 開くときは StackNest を前に出さないことを勧めます（`NSWorkspace.OpenConfiguration.activates = false`）。StackNest は、画面が要るとき（ライブラリの解錠など）だけ自分で前に出ます。前に出すと、本が届くまでの間に前面がビューア → StackNest → ビューアと行き来します。
 
 ## ビューアへのお願い
 

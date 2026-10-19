@@ -57,12 +57,18 @@ public struct StackNestReopenRequest: Sendable, Hashable, CustomStringConvertibl
             && StackNestBookManifest.isAcceptableBookIdentity(bookIdentity)
     }
 
-    /// 参照ファイルの `book` と manifest の同一性から作る。ローカルのライブラリの本（`/api/v1/libraries/<UUID>/books/<番号>`）
-    /// でなければ（中継の本・ほかの形）nil。
+    /// 参照ファイルの `book` と manifest の同一性から作る。手元の StackNest（ホストが loopback ―― `127.0.0.1`・`::1`・`localhost`）の
+    /// ローカルのライブラリの本（`/api/v1/libraries/<UUID>/books/<番号>`）でなければ（中継の本・ほかの Mac の StackNest へ直接
+    /// つないだ本・ほかの形）nil。頼みを受けるのは手元の StackNest なので、ほかの Mac のライブラリは頼めない。
     ///
     /// Makes a request from a reference's `book` and the manifest's identity. nil unless `book` is a local library
-    /// book (`/api/v1/libraries/<UUID>/books/<number>`), e.g. for relayed books.
+    /// book of the StackNest on this Mac (a loopback host — `127.0.0.1`, `::1` or `localhost` — and the path
+    /// `/api/v1/libraries/<UUID>/books/<number>`), e.g. for relayed books or books of another Mac's StackNest: the
+    /// request goes to the StackNest on this Mac.
     public init?(reference: StackNestBookReference, bookIdentity: String) {
+        guard let host = reference.bookURL.absoluteURL.host(percentEncoded: false)?.lowercased(),
+              ["127.0.0.1", "::1", "localhost"].contains(host)
+        else { return nil }
         let segments = reference.bookURL.absoluteURL.path(percentEncoded: true)
             .split(separator: "/", omittingEmptySubsequences: true)
         guard segments.count == 6, segments[0] == "api", segments[1] == "v1", segments[2] == "libraries",
@@ -72,15 +78,19 @@ public struct StackNestReopenRequest: Sendable, Hashable, CustomStringConvertibl
         self.init(checkedLibraryUUID: String(segments[3]), bookID: bookID, bookIdentity: bookIdentity)
     }
 
-    /// 頼みの URL を読む。スキーム・ホスト・パスが違う、3 つの値のどれかが無い・2 回ある・形が外れているなら nil。
-    /// 知らない問い合わせの項目は読み飛ばす（後の版が項目を足せるように）。
+    /// 頼みの URL を読む。スキーム・ホスト・パスが違う（ホストとパスはパーセントエンコードしない形だけ）、ポート（空のものも）・
+    /// 資格情報・フラグメントが付く、3 つの値のどれかが無い・2 回ある・形が外れているなら nil。値は URL の問い合わせとして読む
+    /// （パーセントエンコードは解いてから確かめる）。知らない問い合わせの項目は読み飛ばす（後の版が項目を足せるように）。
     ///
     /// Reads a request URL. nil when the scheme, host or path differ, or a value is missing, repeated or malformed.
     /// Unknown query items are ignored, so later versions can add items.
     public init?(url: URL) {
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.scheme?.lowercased() == Self.scheme, components.host?.lowercased() == Self.host,
-              components.path == Self.path, components.user == nil, components.password == nil, components.port == nil
+              components.scheme?.lowercased() == Self.scheme,
+              components.percentEncodedHost?.lowercased() == Self.host,
+              components.percentEncodedPath == Self.path,
+              components.user == nil, components.password == nil, components.rangeOfPort == nil,
+              components.fragment == nil, Self.authority(of: url.absoluteString)?.lowercased() == Self.host
         else { return nil }
         var values: [String: String] = [:]
         for item in components.queryItems ?? [] where ["library", "book", "identity"].contains(item.name) {
@@ -113,6 +123,14 @@ public struct StackNestReopenRequest: Sendable, Hashable, CustomStringConvertibl
 
     /// `url` と同じ。 / Same as `url`.
     public var description: String { url.absoluteString }
+
+    /// `scheme://` の後ろから最初の `/`・`?`・`#` までの部分（空のポート `viewer:` は URLComponents ではポートとして見えないので、
+    /// 文字で見る）。`//` が無ければ nil。
+    private static func authority(of text: String) -> Substring? {
+        guard let start = text.range(of: "://") else { return nil }
+        let rest = text[start.upperBound...]
+        return rest.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+    }
 
     /// 10 進の数字だけからなる正の番号（先頭の 0・符号・空白は通さない）。
     private static func decimal(_ text: Substring) -> Int? {
