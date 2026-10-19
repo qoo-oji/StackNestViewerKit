@@ -355,6 +355,16 @@ struct StackNestHandoffGroupTests {
         #expect(edge.index == 9_999)
     }
 
+    @Test("with(handoff:) は組だけを差し替え、書いて読み直しても同じ")
+    func withHandoffReplacesOnlyTheGroup() throws {
+        let reference = try StackNestBookReference.parse(Self.json(handoff: nil))
+        let group = try StackNestHandoffGroup(id: "abcdEFGH", index: 0, count: 2)
+        let grouped = reference.with(handoff: group)
+        #expect(grouped.handoff == group)
+        #expect(grouped.with(handoff: nil) == reference)
+        #expect(try StackNestBookReference.parse(grouped.encodedJSON()) == grouped)
+    }
+
     @Test("組は description と dump に出る（秘密ではない）。鍵は出ない")
     func descriptionShowsHandoff() throws {
         let reference = try StackNestBookReference.parse(Self.json(handoff: #"{"id":"abcdEFGH","index":1,"count":3}"#))

@@ -11,8 +11,8 @@ Release notes.
 
 ### 追加 / Added
 
-- `StackNestHandoffGroup` と `StackNestBookReference.handoff`。StackNest で複数の本をいっしょに渡したとき、参照ファイルに入る組の印（同じ組で共通の `id`・選んだ並びの `index`・冊数 `count`）を読み書きする。作る側の `init(…handoff:)` は読む側が捨てる値を投げ、読む側は形の外れた組を nil にする（参照ファイルは断らない）。組の無い参照ファイルのバイト列は前と同じ。サンプル `reference-v1-handoff.stacknestbook` を足した。
-  `StackNestHandoffGroup` and `StackNestBookReference.handoff`, which read and write the group mark a reference file carries when StackNest hands several books over together (an `id` shared by the group, the selection-order `index` and the group size `count`). The producer's `init(…handoff:)` throws for values a reader would drop, and readers turn a malformed group into nil (the file is still accepted). Files without a group encode to the same bytes as before. Added the sample `reference-v1-handoff.stacknestbook`.
+- `StackNestHandoffGroup` と `StackNestBookReference.handoff`。StackNest で複数の本をいっしょに渡したとき、参照ファイルに入る組の印（同じ組で共通の `id`・選んだ並びの `index`・冊数 `count`）を読み書きする。作る側の `init(…handoff:)` は読む側が捨てる値を投げ（組の冊数が後で決まる作る側のために、組だけを差し替える `with(handoff:)` もある）、読む側は形の外れた組を nil にする（参照ファイルは断らない）。組の無い参照ファイルのバイト列は前と同じ。サンプル `reference-v1-handoff.stacknestbook` を足した。
+  `StackNestHandoffGroup` and `StackNestBookReference.handoff`, which read and write the group mark a reference file carries when StackNest hands several books over together (an `id` shared by the group, the selection-order `index` and the group size `count`). The producer's `init(…handoff:)` throws for values a reader would drop (`with(handoff:)` replaces only the group, for producers that learn the group's size later), and readers turn a malformed group into nil (the file is still accepted). Files without a group encode to the same bytes as before. Added the sample `reference-v1-handoff.stacknestbook`.
 
 ## [0.2.0] - 2026-10-19
 

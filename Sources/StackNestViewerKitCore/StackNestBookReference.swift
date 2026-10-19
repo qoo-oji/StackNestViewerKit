@@ -126,6 +126,16 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
         return try parse(data)
     }
 
+    /// 組（`handoff`）だけを差し替えた写し（作る側が、組の冊数が決まってから書き込むため。ほかの値は検査済みのまま）。
+    ///
+    /// A copy with only `handoff` replaced (for producers that learn the group's size after building the
+    /// references; the other values are already checked).
+    public func with(handoff: StackNestHandoffGroup?) -> StackNestBookReference {
+        StackNestBookReference(uncheckedVersion: version, title: title, bookURL: bookURL, token: token,
+                               expiresAt: expiresAt, pageCount: pageCount, direction: direction,
+                               startPage: startPage, handoff: handoff)
+    }
+
     /// 期限を過ぎているか。期限の時刻ちょうどから切れている。 / Whether the token has expired (from `expiresAt` on).
     public func isExpired(at now: Date = Date()) -> Bool { now >= expiresAt }
 
