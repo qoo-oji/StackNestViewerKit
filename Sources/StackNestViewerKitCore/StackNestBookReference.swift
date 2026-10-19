@@ -201,14 +201,14 @@ public struct StackNestBookReference: Sendable, Hashable, CustomStringConvertibl
 
     /// `dump` などの反映。鍵は `<redacted>`。 / The mirror used by `dump` and friends; the token is `<redacted>`.
     public var customMirror: Mirror {
-        Mirror(
-            self,
-            children: [
-                "version": version, "title": title, "bookURL": redactedBookURL, "token": "<redacted>",
-                "expiresAt": expiresAt, "pageCount": pageCount, "direction": direction as Any,
-                "startPage": startPage, "handoff": handoff as Any,
-            ],
-            displayStyle: .struct)
+        // 組は有るときだけ出す（組の無い参照ファイルの dump は前の版と同じ）。
+        var children: [Mirror.Child] = [
+            ("version", version), ("title", title), ("bookURL", redactedBookURL), ("token", "<redacted>"),
+            ("expiresAt", expiresAt), ("pageCount", pageCount), ("direction", direction as Any),
+            ("startPage", startPage),
+        ]
+        if let handoff { children.append(("handoff", handoff)) }
+        return Mirror(self, children: children, displayStyle: .struct)
     }
 
     /// 説明に出す基点。資格情報（`user:pw@`）は読み込みで断るが、値が別の経路で作られても文字列に残さない。

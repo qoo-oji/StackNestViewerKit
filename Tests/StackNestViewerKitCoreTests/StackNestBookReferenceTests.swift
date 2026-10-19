@@ -327,6 +327,17 @@ struct StackNestHandoffGroupTests {
         #expect(try StackNestBookReference.parse(Self.json(handoff: #"{"id":"abcdEFGH","index":0,"count":1}"#)).handoff?.count == 1)
     }
 
+    @Test("dump は組が有るときだけ handoff を出す（組の無い参照ファイルの dump は前と同じ）")
+    func dumpShowsTheGroupOnlyWhenPresent() throws {
+        var plain = ""
+        dump(try StackNestBookReference.parse(Self.json(handoff: nil)), to: &plain)
+        #expect(!plain.contains("handoff"))
+        var grouped = ""
+        dump(try StackNestBookReference.parse(Self.json(handoff: #"{"id":"abcdEFGH","index":0,"count":2}"#)), to: &grouped)
+        #expect(grouped.contains("handoff"))
+        #expect(grouped.contains("abcdEFGH"))
+    }
+
     @Test("形の外れた組は参照ファイルを断らずに nil にする")
     func ignoresMalformedHandoff() throws {
         for value in [#""abc""#, #"[]"#, #"{"index":0,"count":2}"#, #"{"id":"abcdEFGH","count":2}"#,

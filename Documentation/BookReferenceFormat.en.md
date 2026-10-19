@@ -72,7 +72,7 @@ To accept the reference file as a document, import this type with `UTImportedTyp
 
 - Ignore keys you don't know, so that later versions that add keys still open.
 - `title` and `direction` may be absent, and the file still opens. A missing `title`, or one that isn't a string, is treated as an empty title; a missing `direction`, or a value other than `"rtl"` or `"ltr"`, means the file's direction isn't used (after opening, follow `direction` from `manifest`). `handoff` may be absent too; one that doesn't follow the rules below is treated as absent and the file opens as a single book. A file that lacks any other key (`format`, `version`, `book`, `token`, `expiresAt`, `pageCount`, `startPage`), or has one of the wrong type, is refused.
-- "Integer" for `version`, `pageCount` and `startPage` means a JSON number that isn't a boolean, has no fractional part (`5.0` is read as `5`; `5.5` is not an integer) and has an absolute value below 10^15.
+- "Integer" for `version`, `pageCount` and `startPage` (and `handoff`'s `index` and `count`) means a JSON number that isn't a boolean, has no fractional part (`5.0` is read as `5`; `5.5` is not an integer) and has an absolute value below 10^15.
 - A reader **refuses** these files (tell the reader to open the book from StackNest again):
   - can't be read (can't be opened or read), is larger than 1 MiB (1,048,576 bytes), or isn't readable as a JSON object
   - `format` is not `stacknest-book-reference`, or `version` is below 1 (a broken file)
