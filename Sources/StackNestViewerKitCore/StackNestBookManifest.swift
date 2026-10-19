@@ -38,10 +38,12 @@ public struct StackNestBookManifest: Sendable, Equatable {
     }
 
     /// manifest の JSON を読む。読めない・ページ数が整数でない・上限を超えるなら `.invalidResponse`。
-    /// `pageNames` は `acceptablePageNames(_:pageCount:)` に通らなければ、manifest を断らずに nil にする。
+    /// `pageNames` は形が外れていれば（数がページ数と違う・空・重複・表示を崩す文字・長すぎる名前を含む）、manifest を
+    /// 断らずに nil にする。
     ///
     /// Parses manifest JSON. Throws `.invalidResponse` when it can't be read or the page count is invalid.
-    /// `pageNames` that fail `acceptablePageNames(_:pageCount:)` become nil instead of failing the manifest.
+    /// `pageNames` that are malformed (count differs from the page count, or an empty, repeated, overlong name or one
+    /// with characters that break the display) become nil instead of failing the manifest.
     public static func parse(_ data: Data) throws -> StackNestBookManifest {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let pageCount = JSONValues.integer(root["pageCount"]),
@@ -58,24 +60,48 @@ public struct StackNestBookManifest: Sendable, Equatable {
     public static let maxPageNameBytes = 1024
 
     /// ページの名前の一覧の検査。文字列の配列で、数がページ数と同じ、どの名前も空でなく `maxPageNameBytes` 以下で
-    /// 制御文字（改行・NUL など）を含まず、重複しないときだけ返す。1 つでも外れたら一覧ごと捨てる（番号と名前の
-    /// 対応が崩れた一覧を部分的に使わない）。
+    /// 表示を崩す文字（制御文字 = 改行・NUL など、行・段落の区切り U+2028・U+2029、双方向の書式指定 U+202A〜U+202E・
+    /// U+2066〜U+2069）を含まず、重複しないときだけ返す。重複は Swift の文字列の等しさ（正準等価: NFC と NFD は同じ名前）
+    /// で見る。1 つでも外れたら一覧ごと捨てる（番号と名前の対応が崩れた一覧を部分的に使わない）。
     ///
     /// Checks a page name list: an array of strings with one name per page, each non-empty, at most
-    /// `maxPageNameBytes`, free of control characters (newlines, NUL and so on) and unique. One bad entry drops the
-    /// whole list, so a list whose numbering may be off is never used in part.
+    /// `maxPageNameBytes`, free of characters that break the display (control characters such as newlines and NUL,
+    /// the separators U+2028 and U+2029, and the bidirectional formatting characters U+202A–U+202E and
+    /// U+2066–U+2069) and unique. Uniqueness uses Swift string equality (canonical equivalence: NFC and NFD forms are
+    /// the same name). One bad entry drops the whole list, so a list whose numbering may be off is never used in part.
     static func acceptablePageNames(_ value: Any?, pageCount: Int) -> [String]? {
         guard let names = value as? [Any], names.count == pageCount else { return nil }
         var result: [String] = []
         result.reserveCapacity(names.count)
-        var seen = Set<String>()
-        for case let name as String in names {
-            guard !name.isEmpty, name.utf8.count <= maxPageNameBytes,
-                  !name.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }),
+        var seen = Set<String>(minimumCapacity: names.count)
+        for case var name as String in names {
+            // JSONSerialization の文字列は NSString のままで、1 文字ずつ読むと橋渡しが重い（10 万ページで 0.5 秒）。
+            // 一度だけ Swift の UTF-8 の文字列にしてからバイトで見る（判定も Set の hash もこの上で速い）。
+            name.makeContiguousUTF8()
+            guard !name.isEmpty, name.utf8.count <= maxPageNameBytes, !containsDisallowedCharacters(name),
                   seen.insert(name).inserted
             else { return nil }
             result.append(name)
         }
         return result.count == pageCount ? result : nil
+    }
+
+    /// 名前に許さない文字を UTF-8 のバイト列で探す。制御文字（Cc）は U+0000〜U+001F・U+007F（1 バイト）と
+    /// U+0080〜U+009F（C2 80〜C2 9F）、U+2028〜U+202E は E2 80 A8〜AE、U+2066〜U+2069 は E2 81 A6〜A9。
+    ///
+    /// Looks for disallowed characters in the UTF-8 bytes: Cc is U+0000–U+001F and U+007F (one byte) plus
+    /// U+0080–U+009F (C2 80–9F); U+2028–U+202E are E2 80 A8–AE and U+2066–U+2069 are E2 81 A6–A9.
+    private static func containsDisallowedCharacters(_ name: String) -> Bool {
+        var previous2: UInt8 = 0
+        var previous: UInt8 = 0
+        for byte in name.utf8 {
+            if byte < 0x20 || byte == 0x7F { return true }
+            if previous == 0xC2, (0x80...0x9F).contains(byte) { return true }
+            if previous2 == 0xE2, previous == 0x80, (0xA8...0xAE).contains(byte) { return true }
+            if previous2 == 0xE2, previous == 0x81, (0xA6...0xA9).contains(byte) { return true }
+            previous2 = previous
+            previous = byte
+        }
+        return false
     }
 }
