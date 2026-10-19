@@ -25,8 +25,17 @@ public struct StackNestBookManifest: Sendable, Equatable {
     public let bookIdentity: String?
 
     /// 値から作る。 / Creates a manifest from values.
+    public init(pageCount: Int, direction: StackNestReadingDirection?, format: String?, etag: String?) {
+        self.init(pageCount: pageCount, direction: direction, format: format, etag: etag, bookIdentity: nil)
+    }
+
+    /// 値から作る（`bookIdentity` つき）。前の版の `init(pageCount:direction:format:etag:)` を残すため、既定値ではなく別の init にする
+    /// （既定値の引数を足すと、前の版の init が公開の面から消える）。
+    ///
+    /// Creates a manifest from values, with `bookIdentity`. A separate initializer rather than a defaulted argument keeps
+    /// the previous `init(pageCount:direction:format:etag:)` in the public interface.
     public init(pageCount: Int, direction: StackNestReadingDirection?, format: String?, etag: String?,
-                bookIdentity: String? = nil)
+                bookIdentity: String?)
     {
         self.pageCount = pageCount
         self.direction = direction
