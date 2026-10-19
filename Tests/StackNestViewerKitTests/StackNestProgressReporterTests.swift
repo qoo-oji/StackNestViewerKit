@@ -217,6 +217,19 @@ struct StackNestProgressReporterTests {
         #expect(sent.pages == [2])
     }
 
+    @Test("送信の最中の flush の後に止まったページは、送信が失敗したら張り直して送る(flush の約束はそのとき止まっていたページだけ)")
+    func pageNotedAfterAFlushDuringASendStillGoesOut() async {
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1, slowDelay: .milliseconds(300))
+        let progress = reporter(sent, debounce: .milliseconds(50), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        progress.flush()          // 止まっているページが無いまま、送信の最中に flush(窓が後ろへ回ったときなど)
+        progress.note(page: 2)    // その後に止まったページ
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [2])
+        #expect(!progress.hasUnsentWork)
+    }
+
     @Test("恒久的な失敗の後は、送信の最中に止まった新しいページも張り直さない")
     func permanentFailureDoesNotRearm() async {
         let sent = ScriptedSend([StackNestViewerError(.unauthorized)], slowPage: 1, slowDelay: .milliseconds(200))

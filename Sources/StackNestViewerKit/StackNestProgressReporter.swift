@@ -112,6 +112,9 @@ public final class StackNestProgressReporter {
         guard !isStopped, !isClosed, page >= 0 else { return }
         if page == lastSentPage, pendingPage == nil { return }
         pendingPage = page
+        // 送信の最中に受けた `flush()` の約束(成功した後にだけ送る)は、そのとき止まっていたページの話。後から止まったページは、
+        // 自分のまとめ待ちの約束を持つ(送信が失敗しても張り直す)。
+        flushedDuringSend = false
         scheduleDebounce()
     }
 
