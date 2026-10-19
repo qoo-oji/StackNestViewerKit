@@ -9,6 +9,11 @@ Release notes.
 
 ## [Unreleased]
 
+### 追加 / Added
+
+- `StackNestBookSession.Configuration.requestsPageNames`（既定 false）と `StackNestBookManifest.pageNames`。ON にすると manifest の要求に `?pageNames=1` を付け、StackNest が返すページの名前（書庫の中のパス・フォルダの本のファイル名。StackNest のページ番号の順）を読む。名前を返さない古い StackNest でも manifest はそのまま読める。数がページ数と違う・空・重複・制御文字・長すぎる名前を含む一覧は、まるごと nil にする。見立ての `StackNestStubServer.setPageNames(_:)` で試せる。
+  `StackNestBookSession.Configuration.requestsPageNames` (off by default) and `StackNestBookManifest.pageNames`. When on, manifest requests add `?pageNames=1` and read the page names StackNest returns (paths inside the archive, file names for folder books, in StackNest page order). Older StackNest versions that don't return names still give a normal manifest. A list whose count differs from the page count, or with an empty, repeated, control-character or overlong name, becomes nil as a whole. Try it with the stub's `StackNestStubServer.setPageNames(_:)`.
+
 ## [0.2.0] - 2026-10-19
 
 ### 追加 / Added

@@ -85,6 +85,14 @@ public final class StackNestBookSession: @unchecked Sendable {
         /// requests to another service on 127.0.0.1. Set it to true only when the app knowingly connects to a base
         /// of another shape (`allowedHosts` still applies).
         public var allowsAnyBookPath = false
+        /// manifest の要求でページの名前（`StackNestBookManifest.pageNames`）を頼むか（`?pageNames=1` を付ける）。
+        /// 既定は頼まない（名前の一覧はページ数に比例して manifest を大きくする）。名前を知らない古い StackNest は
+        /// 問い合わせを読み飛ばして名前の無い manifest を返すので、どの版の StackNest にも付けてよい。
+        ///
+        /// Whether manifest requests ask for page names (`StackNestBookManifest.pageNames`) by adding `?pageNames=1`.
+        /// Off by default (the list makes the manifest grow with the page count). Older StackNest versions ignore the
+        /// query and answer without names, so it is safe to set for any version.
+        public var requestsPageNames = false
         /// 名乗り（nil なら `Bundle.main` から。`format=` は常に参照ファイルの版）。
         ///
         /// The identification (nil means `Bundle.main`; `format=` is always the reference file's version).
