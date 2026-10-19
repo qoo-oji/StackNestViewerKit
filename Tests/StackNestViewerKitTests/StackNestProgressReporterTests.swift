@@ -200,6 +200,36 @@ struct StackNestProgressReporterTests {
         #expect(progress.hasUnsentWork, "失敗したページは次の合図・flush・close で送る")
     }
 
+    @Test("送信の最中に flush を受けていれば、送信が失敗しても（まとめ待ちより長くても）新しいページを張り直さず、次の flush で送る")
+    func flushDuringAFailingSendKeepsTheFlushContract() async {
+        let sent = ScriptedSend([StackNestViewerError(.cannotConnect)], slowPage: 1, slowDelay: .milliseconds(200))
+        let progress = reporter(sent, debounce: .milliseconds(50), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        progress.note(page: 2)
+        progress.flush()
+        await progress.waitUntilIdle()
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(sent.attemptCount == 1)
+        #expect(progress.hasUnsentWork)
+        progress.flush()
+        await progress.waitUntilIdle()
+        #expect(sent.pages == [2])
+    }
+
+    @Test("恒久的な失敗の後は、送信の最中に止まった新しいページも張り直さない")
+    func permanentFailureDoesNotRearm() async {
+        let sent = ScriptedSend([StackNestViewerError(.unauthorized)], slowPage: 1, slowDelay: .milliseconds(200))
+        let progress = reporter(sent, debounce: .milliseconds(50), maxWait: .seconds(5))
+        progress.note(page: 1)
+        progress.flush()
+        progress.note(page: 2)
+        await progress.waitUntilIdle()
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(sent.attemptCount == 1)
+        #expect(!progress.hasUnsentWork)
+    }
+
     /// 約 25 ms ごとにページを送り続ける（`span` の間）。最後のページと、合図の間の最長の間隔（最後の合図から
     /// 戻るまでも含む）を返す。混んだ CI の機では 25 ms の眠りが 0.7 秒ほどに延びることがあるので、試験は
     /// まとめ待ちをこの間隔より十分に長く取り、間隔がまとめ待ちより短いことを前提として確かめる。
